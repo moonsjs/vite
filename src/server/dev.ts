@@ -6,6 +6,7 @@ import type { PluginRuntime } from "./plugins";
 import type { Shell } from "./shell";
 import { createDevShell } from "./shell";
 import { sendNodeResponse, toWebRequest } from "./node";
+import { emptyDevtoolsData, renderDevtoolsHtml, type DevtoolsData } from "../devtools";
 
 interface DevApp {
   handler: (request: Request) => Promise<Response>;
@@ -26,7 +27,13 @@ type DevServerEntry = {
  */
 export function installDevMiddleware(
   server: ViteDevServer,
-  options: { templatePath: string; payloadScan?: PayloadScanOptions; apiPrefix?: string },
+  options: {
+    templatePath: string;
+    payloadScan?: PayloadScanOptions;
+    apiPrefix?: string;
+    /** Addendum I.4: datasource devtools overlay (dipanggil per request). */
+    devtools?: () => DevtoolsData;
+  },
 ): void {
   let appPromise: Promise<DevApp> | null = null;
 
@@ -48,6 +55,24 @@ export function installDevMiddleware(
   });
 
   server.middlewares.use((req, res, next) => {
+    // Addendum I.4 (W4): overlay dev-only — selalu data segar per request.
+    if (
+      (req.method === "GET" || req.method === "HEAD") &&
+      new URL(req.url ?? "/", "http://localhost").pathname === "/__moons/devtools"
+    ) {
+      try {
+        const data = options.devtools?.() ?? emptyDevtoolsData();
+        res.statusCode = 200;
+        res.setHeader("content-type", "text/html; charset=utf-8");
+        res.end(req.method === "HEAD" ? undefined : renderDevtoolsHtml(data));
+      } catch (error) {
+        res.statusCode = 500;
+        res.setHeader("content-type", "text/plain; charset=utf-8");
+        res.end(`[moons] devtools gagal dirender: ${String(error)}`);
+      }
+      return;
+    }
+
     if (!shouldHandle(req, options.apiPrefix)) {
       next();
       return;

@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { resolve as resolvePath } from "node:path";
+import { relative as relativePath, resolve as resolvePath } from "node:path";
 import {
+  MOONS_VERSION,
   MoonsError,
   fnRegistryKey,
   generateTypes,
@@ -423,6 +424,30 @@ export default function moons(options: MoonsVitePluginOptions = {}): Plugin {
     configureServer(server) {
       installDevMiddleware(server, {
         templatePath: resolvePath(root, "index.html"),
+        // Addendum I.4 (W4): overlay devtools — data segar per request.
+        devtools: () => {
+          const toRelative = (file: string): string =>
+            file.startsWith(root) ? relativePath(root, file).split("\\").join("/") : file;
+          return {
+            routes: [...routes]
+              .sort((a, b) => a.path.localeCompare(b.path) || a.kind.localeCompare(b.kind))
+              .map((route) => ({ path: route.path, kind: route.kind, file: toRelative(route.file) })),
+            apiRoutes: [...apiRoutes]
+              .sort((a, b) => a.path.localeCompare(b.path))
+              .map((route) => ({ path: route.path, kind: "api", file: toRelative(route.file) })),
+            serverFns: [...analysisCache.values()]
+              .flatMap((analysis) =>
+                analysis.serverFns.map((fn) => ({
+                  file: toRelative(analysis.file),
+                  name: fn.name,
+                  hash: fn.hash,
+                })),
+              )
+              .sort((a, b) => a.file.localeCompare(b.file) || a.name.localeCompare(b.name)),
+            canary: options.leakTest?.canary !== undefined,
+            version: MOONS_VERSION,
+          };
+        },
         // A1: pemindaian payload SSR hanya di dev (warning), tanpa biaya di production.
         payloadScan: {
           ...(options.leakTest?.canary === undefined ? {} : { canary: options.leakTest.canary }),
@@ -433,6 +458,7 @@ export default function moons(options: MoonsVitePluginOptions = {}): Plugin {
           ? {}
           : { apiPrefix: `/${apiDir.split(/[\\/]/).filter((part) => part.length > 0).pop() ?? "api"}` }),
       });
+      server.config.logger.info("[moons] devtools: /__moons/devtools");
     },
 
     async handleHotUpdate(context) {
