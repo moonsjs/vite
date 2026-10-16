@@ -125,6 +125,40 @@ test("Addendum I: revalidate=0 → stale disajikan lalu storage diregenerasi", a
   }
 });
 
+test("L.2/F1: storage MISS → fallback file (aset) ; storage tetap menang", async () => {
+  __resetIsrInflight();
+  const clientDir = makeClientDir(36000);
+  // File untuk path ISR yang juga ada di storage (harus KALAH oleh storage).
+  mkdirSync(join(clientDir, "x"), { recursive: true });
+  writeFileSync(join(clientDir, "x", "index.html"), "<html>file-lama</html>");
+  mkdirSync(join(clientDir, "assets"), { recursive: true });
+  writeFileSync(join(clientDir, "assets", "app.js"), "export const app = 1;");
+
+  const storage = makeMemoryStorage({ "/x": "<html>storage-baru</html>" });
+  let calls = 0;
+  const server = startNodeServer(
+    async () => {
+      calls += 1;
+      return new Response("handler", { status: 404 });
+    },
+    { port: 0, clientDir, storage, handleSignals: false },
+  );
+  const port = await listen(server);
+  try {
+    const fromStorage = await fetch(`http://127.0.0.1:${port}/x`);
+    expect(await fromStorage.text()).toContain("storage-baru");
+
+    const asset = await fetch(`http://127.0.0.1:${port}/assets/app.js`);
+    expect(asset.status).toBe(200);
+    expect(asset.headers.get("etag")).not.toBeNull();
+    expect(await asset.text()).toContain("export const app");
+
+    expect(calls).toBe(0); // keduanya tidak menyentuh handler
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 test("Addendum I: createFileStorage — read/write roundtrip di file sistem", async () => {
   const dir = mkdtempSync(join(tmpdir(), "moons-file-storage-"));
   const storage = createFileStorage(dir);

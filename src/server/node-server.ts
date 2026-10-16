@@ -95,7 +95,7 @@ export function startNodeServer(
 
       try {
         if (req.method === "GET" || req.method === "HEAD") {
-          // Addendum I: storage bersama (bila dikonfigurasi) menggantikan file lokal.
+          // Addendum I: storage bersama (bila dikonfigurasi) diutamakan.
           if (options.storage !== undefined) {
             const entry = await options.storage.read(url.pathname);
             if (entry !== null) {
@@ -113,13 +113,19 @@ export function startNodeServer(
               res.end(req.method === "HEAD" ? undefined : Buffer.from(entry.body));
               return;
             }
-          } else {
+            // L.2 (temuan F1): storage MISS → jatuh ke file `dist/client`
+            // (aset/non-ISR); storage tetap menang untuk path yang dimilikinya.
+          }
+          {
             const staticFile = resolveStaticFile(clientDir, url.pathname);
             if (staticFile !== null) {
               scheduleRevalidation({
                 pathname: url.pathname,
                 mtimeMs: statSync(staticFile).mtimeMs,
                 file: staticFile,
+                // Bila storage dikonfigurasi, hasil regenerasi (walau fallback
+                // dari file) tetap ditulis ke storage bersama (L.2).
+                ...(options.storage === undefined ? {} : { storage: options.storage }),
                 handler,
                 options,
                 clientDir,
