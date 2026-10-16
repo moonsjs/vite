@@ -1,4 +1,5 @@
 import { renameSync, writeFileSync } from "node:fs";
+import type { PrerenderStorage } from "@moonsjs/core";
 import { scanPayloadForSecrets } from "../payload-scan";
 
 /**
@@ -18,8 +19,13 @@ export function shouldRevalidate(input: {
 export interface RevalidateOptions {
   /** Path URL ternormalisasi (mis. "/blog/hello"). */
   pathname: string;
-  /** File HTML yang akan ditimpa. */
-  file: string;
+  /** File HTML yang akan ditimpa (default file storage). */
+  file?: string;
+  /**
+   * Storage alternatif (Addendum I). Bila diisi, `file` diabaikan dan hasil
+   * regenerasi ditulis lewat `storage.write(pathname, body)`.
+   */
+  storage?: PrerenderStorage;
   handler: (request: Request) => Promise<Response>;
   canary?: string;
   env?: Record<string, string | undefined>;
@@ -65,6 +71,14 @@ async function runRevalidate(options: RevalidateOptions): Promise<void> {
         .join(", ");
       // Fail-closed: jangan menimpa file statis dengan konten bocor.
       log(`[moons] isr: TIDAK menulis ${options.pathname} — memuat ${labels}`);
+      return;
+    }
+    if (options.storage !== undefined) {
+      await options.storage.write(options.pathname, new TextEncoder().encode(html));
+      return;
+    }
+    if (options.file === undefined) {
+      log(`[moons] isr: lewati ${options.pathname} — tanpa file/storage tujuan`);
       return;
     }
     const tmp = `${options.file}.tmp-${process.pid}`;

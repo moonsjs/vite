@@ -16,3 +16,4 @@ export { runPrerender } from "./prerender";
 export type { PrerenderOptions, PrerenderResult } from "./prerender";
 export type { PayloadScanOptions } from "../payload-scan";
 export type { ApiHandlerArgs, ApiMethod, ApiRouteDefinition } from "@moonsjs/core";
+export { createFileStorage, contentTypeForPathname } from "./storage";

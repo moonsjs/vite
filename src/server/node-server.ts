@@ -1,7 +1,9 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { extname, join, resolve, sep } from "node:path";
+import type { PrerenderStorage } from "@moonsjs/core";
 import { revalidatePrerendered, shouldRevalidate } from "./isr";
+import { contentTypeForPathname } from "./storage";
 import { sendNodeResponse, toWebRequest } from "./node";
 import type { PluginRuntime } from "./plugins";
 import { installGracefulShutdown } from "./shutdown";
@@ -44,6 +46,12 @@ export interface NodeServerOptions {
    * prerender yang disajikan langsung (static host memakai `_headers`).
    */
   headers?: Record<string, string>;
+  /**
+   * Storage bersama untuk file prerender (Addendum I, ISR multi-instance).
+   * Bila diisi, penyajian file prerender dan penulisan hasil regenerasi
+   * memakai storage ini; default: file sistem lokal.
+   */
+  storage?: PrerenderStorage;
 }
 
 /**
@@ -63,19 +71,50 @@ export function startNodeServer(
         const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
 
         if (req.method === "GET" || req.method === "HEAD") {
-          const staticFile = resolveStaticFile(clientDir, url.pathname);
-          if (staticFile !== null) {
-            scheduleRevalidation(staticFile, url.pathname, handler, options, clientDir);
-            const body = readFileSync(staticFile);
-            res.statusCode = 200;
-            res.setHeader("content-type", MIME_TYPES[extname(staticFile).toLowerCase()] ?? "application/octet-stream");
-            for (const [name, value] of Object.entries(options.headers ?? {})) {
-              if (!res.hasHeader(name)) {
-                res.setHeader(name, value);
+          // Addendum I: storage bersama (bila dikonfigurasi) menggantikan file lokal.
+          if (options.storage !== undefined) {
+            const entry = await options.storage.read(url.pathname);
+            if (entry !== null) {
+              scheduleRevalidation({
+                pathname: url.pathname,
+                mtimeMs: entry.mtimeMs,
+                storage: options.storage,
+                handler,
+                options,
+                clientDir,
+              });
+              res.statusCode = 200;
+              res.setHeader("content-type", contentTypeForPathname(url.pathname));
+              for (const [name, value] of Object.entries(options.headers ?? {})) {
+                if (!res.hasHeader(name)) {
+                  res.setHeader(name, value);
+                }
               }
+              res.end(req.method === "HEAD" ? undefined : Buffer.from(entry.body));
+              return;
             }
-            res.end(req.method === "HEAD" ? undefined : body);
-            return;
+          } else {
+            const staticFile = resolveStaticFile(clientDir, url.pathname);
+            if (staticFile !== null) {
+              scheduleRevalidation({
+                pathname: url.pathname,
+                mtimeMs: statSync(staticFile).mtimeMs,
+                file: staticFile,
+                handler,
+                options,
+                clientDir,
+              });
+              const body = readFileSync(staticFile);
+              res.statusCode = 200;
+              res.setHeader("content-type", MIME_TYPES[extname(staticFile).toLowerCase()] ?? "application/octet-stream");
+              for (const [name, value] of Object.entries(options.headers ?? {})) {
+                if (!res.hasHeader(name)) {
+                  res.setHeader(name, value);
+                }
+              }
+              res.end(req.method === "HEAD" ? undefined : body);
+              return;
+            }
           }
         }
 
@@ -122,6 +161,15 @@ export function startNodeServer(
 
 /** Resolve file static dengan proteksi path traversal (+ manifest prerender D.5). */
 export function resolveStaticFile(clientDir: string, pathname: string): string | null {
+  const target = staticFileTarget(clientDir, pathname);
+  return target !== null && isFile(target) ? target : null;
+}
+
+/**
+ * Target file untuk `pathname` (tanpa cek keberadaan) — dipakai penyajian,
+ * `createFileStorage().write`, dan test. Proteksi path traversal tetap.
+ */
+export function staticFileTarget(clientDir: string, pathname: string): string | null {
   let decoded: string;
   try {
     decoded = decodeURIComponent(pathname);
@@ -141,10 +189,7 @@ export function resolveStaticFile(clientDir: string, pathname: string): string |
   const manifest = readPrerenderManifest(clientDir);
   if (manifest.paths.has(normalized)) {
     const target = normalized === "/" ? "index.html" : `${normalized.slice(1)}/index.html`;
-    const candidate = safeWithin(clientDir, `./${target}`);
-    if (candidate !== null && isFile(candidate)) {
-      return candidate;
-    }
+    return safeWithin(clientDir, `./${target}`);
   }
 
   return null;
@@ -221,32 +266,30 @@ function readPrerenderManifest(clientDir: string): PrerenderManifestInfo {
 }
 
 /** ISR: jika file prerender kedaluwarsa, regenerasi background (SWR). */
-function scheduleRevalidation(
-  staticFile: string,
-  pathname: string,
-  handler: (request: Request) => Promise<Response>,
-  options: NodeServerOptions,
-  clientDir: string,
-): void {
-  const normalized = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
-  const seconds = readPrerenderManifest(clientDir).revalidate.get(normalized);
+function scheduleRevalidation(input: {
+  pathname: string;
+  mtimeMs: number;
+  file?: string;
+  storage?: PrerenderStorage;
+  handler: (request: Request) => Promise<Response>;
+  options: NodeServerOptions;
+  clientDir: string;
+}): void {
+  const normalized = input.pathname.length > 1 ? input.pathname.replace(/\/+$/, "") : input.pathname;
+  const seconds = readPrerenderManifest(input.clientDir).revalidate.get(normalized);
   if (seconds === undefined || seconds < 0) {
     return;
   }
-  let mtimeMs: number;
-  try {
-    mtimeMs = statSync(staticFile).mtimeMs;
-  } catch {
-    return;
-  }
-  if (!shouldRevalidate({ mtimeMs, revalidateSeconds: seconds })) {
+  if (!shouldRevalidate({ mtimeMs: input.mtimeMs, revalidateSeconds: seconds })) {
     return;
   }
   void revalidatePrerendered({
     pathname: normalized,
-    file: staticFile,
-    handler,
-    ...(options.canary === undefined ? {} : { canary: options.canary }),
+    ...(input.file === undefined ? {} : { file: input.file }),
+    ...(input.storage === undefined ? {} : { storage: input.storage }),
+    handler: input.handler,
+    ...(input.options.canary === undefined ? {} : { canary: input.options.canary }),
+    env: process.env,
   });
 }
 

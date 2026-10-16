@@ -541,7 +541,7 @@ function renderServerEntryBuild(
     "  onContext: (ctx) => plugins.applyExtensions(ctx),",
     "});",
     "",
-    `startNodeServer(handler, { plugins, headers: config.headers${canary === undefined ? "" : `, canary: ${JSON.stringify(canary)}`} });`,
+    `startNodeServer(handler, { plugins, headers: config.headers, storage: config.isr?.storage${canary === undefined ? "" : `, canary: ${JSON.stringify(canary)}`} });`,
     "",
   ].join("\n");
 }
