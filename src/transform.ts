@@ -552,17 +552,17 @@ export function renderServerFnStub(
               file: filename,
               line: fn.line,
               annotation: fn.name,
-              message: `schema ${kind} serverFn \`${fn.name}\` merujuk nilai server \`${reference}\` dari \`${serverImport.specifier}\``,
+              message: `schema ${kind} of serverFn \`${fn.name}\` references server value \`${reference}\` from \`${serverImport.specifier}\``,
               details:
-                `\`${reference}\` diimpor dari file server lain dan bukan serverFn — stub client tidak mengekspornya (dulu gagal dengan error mentah bundler \`MISSING_EXPORT\`).\n\n` +
-                "Pilih salah satu:\n" +
-                "  // a) pindahkan konstanta/schema ke modul client-safe\n" +
+                `\`${reference}\` is imported from another server file and is not a serverFn — the client stub does not export it (previously a raw bundler \`MISSING_EXPORT\` error).\n\n` +
+                "Pick one:\n" +
+                "  // a) move the constant/schema to a client-safe module\n" +
                 `  import { ${reference} } from "../shared/schemas";\n` +
-                "  // b) inline nilai yang memang publik di schema, atau\n" +
-                "  // c) validasi tambahan di handler (server) tanpa mereferensikan nilai server di schema",
+                "  // b) inline the value if it is genuinely public in the schema, or\n" +
+                "  // c) do extra validation in the server handler without referencing server values in the schema",
               suggestions: [
-                "Pindahkan deklarasi yang dirujuk ke modul bersama yang client-safe (mis. `src/shared/schemas.ts`)",
-                "Atau lakukan validasi di handler server, bukan di ekspresi schema",
+                "Move the referenced declaration to a client-safe shared module (e.g. `src/shared/schemas.ts`)",
+                "Or do the validation in the server handler instead of the schema expression",
               ],
             });
           }
@@ -576,21 +576,21 @@ export function renderServerFnStub(
           file: filename,
           line: fn.line,
           annotation: fn.name,
-          message: `schema ${kind} serverFn \`${fn.name}\` merujuk deklarasi lokal \`${reference}\``,
+          message: `schema ${kind} of serverFn \`${fn.name}\` references local declaration \`${reference}\``,
           details:
-            `\`${reference}\` dibuang dari stub client, sehingga nilainya \`undefined\` di browser (crash hydration).\n\n` +
-            "Sebelum (ditolak):\n" +
-            `  const ${reference} = z.object({ … });                 // deklarasi lokal di file yang sama\n` +
+            `\`${reference}\` is dropped from the client stub, so its value is \`undefined\` in the browser (hydration crash).\n\n` +
+            "Before (rejected):\n" +
+            `  const ${reference} = z.object({ … });                 // local declaration in the same file\n` +
             `  export const ${fn.name} = serverFn({ ${kind}: ${reference}, … });\n\n` +
-            "Sesudah (pilih salah satu):\n" +
-            `  // a) inline schema di argumen\n` +
+            "After (pick one):\n" +
+            `  // a) inline the schema in the argument\n` +
             `  export const ${fn.name} = serverFn({ ${kind}: z.object({ … }), … });\n` +
-            `  // b) pindahkan deklarasi ke modul bersama yang boleh masuk client (mis. src/shared/schemas.ts)\n` +
+            `  // b) move the declaration to a shared module that may enter the client (e.g. src/shared/schemas.ts)\n` +
             `  import { ${reference} } from "../shared/schemas";`,
           suggestions: [
-            `Inline schema di argumen \`serverFn({ ${kind}: … })\`, atau`,
-            `Pindahkan \`${reference}\` ke modul bersama (mis. \`src/shared/schemas.ts\`) lalu impor dari sana`,
-            "Jangan memindahkan nilai rahasia ke shared — schema harus client-safe (zod/Standard Schema)",
+            `Inline the schema in the argument \`serverFn({ ${kind}: … })\`, or`,
+            `Move \`${reference}\` to a shared module (e.g. \`src/shared/schemas.ts\`) and import it from there`,
+            "Never move secret values to shared — the schema must be client-safe (zod/Standard Schema)",
           ],
         });
       }
@@ -607,9 +607,9 @@ export function renderServerFnStub(
       throw new MoonsError({
         code: "E_SERVER_IMPORT_IN_CLIENT",
         file: filename,
-        message: `tidak bisa me-resolve \`${reExport.source}\` untuk re-export`,
-        details: "Re-export dari `*.server.ts` harus bisa di-resolve statis.",
-        suggestions: ["Perbaiki path re-export", "Hindari re-export dinamis dari file server"],
+        message: `cannot resolve \`${reExport.source}\` for re-export`,
+        details: "Re-exports from `*.server.ts` must be statically resolvable.",
+        suggestions: ["Fix the re-export path", "Avoid dynamic re-exports from server files"],
       });
     }
     const targetNames = serverFnExportNames(target, (specifier) =>
@@ -630,9 +630,9 @@ export function renderServerFnStub(
       throw new MoonsError({
         code: "E_SERVER_IMPORT_IN_CLIENT",
         file: filename,
-        message: `\`export *\` dari \`${specifier}\` tidak bisa di-resolve`,
-        details: "`export *` dari `*.server.ts` wajib bisa di-expand statis.",
-        suggestions: ["Perbaiki path re-export", "Ganti menjadi named re-export"],
+        message: `\`export *\` from \`${specifier}\` cannot be resolved`,
+        details: "`export *` from `*.server.ts` must be statically expandable.",
+        suggestions: ["Fix the re-export path", "Replace it with named re-exports"],
       });
     }
     const targetNames = serverFnExportNames(target, (nested) =>
@@ -646,7 +646,7 @@ export function renderServerFnStub(
   }
 
   if (importLines.length === 0 && exportLines.length === 0) {
-    return { code: "// @moons: tidak ada serverFn yang di-export\nexport {};\n", referenced };
+    return { code: "// @moons: no serverFn exported\nexport {};\n", referenced };
   }
 
   return { code: `${[...importLines, "", ...exportLines].join("\n")}\n`, referenced };
@@ -747,12 +747,12 @@ export function nonContractServerFileError(file: string, projectRoot: string): M
   return new MoonsError({
     code: "E_SERVER_IMPORT_IN_CLIENT",
     file: toRelative(projectRoot, file),
-    message: "file server memakai ekstensi di luar kontrak `*.server.ts`",
+    message: "server file uses an extension outside the `*.server.ts` contract",
     details:
-      "Transform zero-trust hanya menangani `*.server.ts`/`*.server.tsx`; file server dengan ekstensi lain tidak bisa di-stub dan tidak boleh masuk graph client.",
+      "The zero-trust transform only handles `*.server.ts`/`*.server.tsx`; server files with other extensions cannot be stubbed and must not enter the client graph.",
     suggestions: [
-      "Ganti nama file menjadi `*.server.ts`/`*.server.tsx` dan taruh `serverFn` di dalamnya",
-      "Atau pindahkan nilai yang dibutuhkan ke file non-server",
+      "Rename the file to `*.server.ts`/`*.server.tsx` and put the `serverFn` inside it",
+      "Or move the value you need into a non-server file",
     ],
   });
 }
@@ -942,12 +942,12 @@ export async function checkClientModuleImports(
       code: "E_FORBIDDEN_SERVER_IMPORT",
       file: relativeFile,
       line,
-      message: `mengimpor \`${specifier}\` — \`moons.config.ts\` adalah modul server-only`,
+      message: `importing \`${specifier}\` — \`moons.config.ts\` is a server-only module`,
       details:
-        "Config memuat `context`/`middleware` (kode server) dan tidak pernah masuk bundle client (Addendum J.4).",
+        "The config contains `context`/`middleware` (server code) and never enters the client bundle (Addendum J.4).",
       suggestions: [
-        "Pindahkan nilai yang dibutuhkan ke modul client-safe (mis. `src/shared/…`)",
-        "Ambil nilai dari server lewat loader/serverFn",
+        "Move the value you need into a client-safe module (e.g. `src/shared/…`)",
+        "Get the value from the server via a loader/serverFn",
       ],
     });
   };
@@ -957,12 +957,12 @@ export async function checkClientModuleImports(
       code: "E_FORBIDDEN_SERVER_IMPORT",
       file: relativeFile,
       line,
-      message: `mengimpor \`${specifier}\` — \`${toRelative(projectRoot, resolvedTarget)}\` ada di \`src/server/**\` (server-only)`,
+      message: `importing \`${specifier}\` — \`${toRelative(projectRoot, resolvedTarget)}\` is inside \`src/server/**\` (server-only)`,
       details:
-        "Direktori `src/server/**` hanya untuk kode server (Addendum J.4); suffix `.server.ts` bukan satu-satunya jaminan.",
+        "The `src/server/**` directory is for server code only (Addendum J.4); the `.server.ts` suffix is not the only guarantee.",
       suggestions: [
-        "Pindahkan kode yang client-safe ke `src/shared/`",
-        "Akses nilainya dari server lewat loader/serverFn",
+        "Move client-safe code to `src/shared/`",
+        "Access the value from the server via a loader/serverFn",
       ],
     });
   };
@@ -973,12 +973,12 @@ export async function checkClientModuleImports(
       code: "E_FORBIDDEN_SERVER_IMPORT",
       file: relativeFile,
       line,
-      message: `mengimpor \`${specifier}\` — \`${relApi}\` adalah modul API server-only`,
+      message: `importing \`${specifier}\` — \`${relApi}\` is a server-only API module`,
       details:
-        "`src/api/**` hanya berjalan di server (endpoint HTTP) dan tidak pernah masuk bundle client.",
+        "`src/api/**` only runs on the server (HTTP endpoints) and never enters the client bundle.",
       suggestions: [
-        "Pindahkan operasi tersebut ke `*.server.ts` dan panggil lewat serverFn",
-        "Jangan mengimpor file `src/api` dari route/komponen client",
+        "Move the operation into `*.server.ts` and call it via a serverFn",
+        "Do not import `src/api` files from client routes/components",
       ],
     });
   };
@@ -1034,8 +1034,8 @@ export async function checkClientModuleImports(
       message,
       details,
       suggestions: [
-        "Buat server function yang mengembalikan data yang dibutuhkan, atau",
-        "Jika nilainya memang publik, definisikan ulang konstanta itu di modul yang boleh masuk client (jangan memindahkan nilai rahasia)",
+        "Create a server function that returns the data you need, or",
+        "If the value is genuinely public, redefine the constant in a client-safe module (never move secret values)",
       ],
     });
   };
@@ -1045,11 +1045,11 @@ export async function checkClientModuleImports(
       code: "E_FORBIDDEN_SERVER_IMPORT",
       file: relativeFile,
       line,
-      message: `mengimpor \`${specifier}\` di modul client`,
-      details: "Modul server-only hanya boleh di-import dari *.server.ts.",
+      message: `importing \`${specifier}\` in a client module`,
+      details: "Server-only modules may only be imported from *.server.ts.",
       suggestions: [
-        "Pindahkan operasi tersebut ke serverFn, atau",
-        "Hapus import tersebut",
+        "Move the operation into a serverFn, or",
+        "Remove the import",
       ],
     });
   };
@@ -1177,13 +1177,13 @@ export async function checkClientModuleImports(
                 code: "E_SERVER_IMPORT_IN_CLIENT",
                 file: relativeFile,
                 line,
-                message: `mengimpor \`${name}\` — berasal dari \`${toRelative(projectRoot, serverFile)}\` (via rantai re-export)`,
+                message: `importing \`${name}\` — comes from \`${toRelative(projectRoot, serverFile)}\` (via a re-export chain)`,
                 details:
-                  `\`${toRelative(projectRoot, resolvedTarget)}\` me-re-export nilai dari file server; ` +
-                  "stub client tidak mengekspornya (dulu gagal dengan error mentah bundler `MISSING_EXPORT`).",
+                  `\`${toRelative(projectRoot, resolvedTarget)}\` re-exports a value from a server file; ` +
+                  "the client stub does not export it (previously a raw bundler `MISSING_EXPORT` error).",
                 suggestions: [
-                  "Buat server function yang mengembalikan data yang dibutuhkan, atau",
-                  "Definisikan ulang konstanta publik itu di modul client-safe (jangan pindahkan nilai rahasia)",
+                  "Create a server function that returns the data you need, or",
+                  "Redefine the public constant in a client-safe module (never move secret values)",
                 ],
               });
             }
@@ -1197,7 +1197,7 @@ export async function checkClientModuleImports(
 
       if (statement.type === "ExportAllDeclaration") {
         if (resolvedTarget === null) {
-          reject(line, `\`export *\` dari \`${targetRelative}\` tidak bisa di-resolve`, "Re-export dari `*.server.ts` wajib bisa di-resolve statis.");
+          reject(line, `\`export *\` from \`${targetRelative}\` cannot be resolved`, "Re-exports from `*.server.ts` must be statically resolvable.");
         }
         continue; // aman: target menjadi stub
       }
@@ -1205,10 +1205,10 @@ export async function checkClientModuleImports(
       const specifiers = (statement["specifiers"] ?? []) as AstNode[];
       for (const item of specifiers) {
         if (item.type === "ImportDefaultSpecifier") {
-          reject(line, `mengimpor default dari ${targetRelative}`, "Default export dari file server tidak boleh menyeberang ke client.");
+          reject(line, `importing the default export from ${targetRelative}`, "Default exports from a server file must not cross to the client.");
         }
         if (item.type === "ImportNamespaceSpecifier") {
-          reject(line, `mengimpor namespace (\`* as\`) dari ${targetRelative}`, "Import namespace dari file server tidak boleh menyeberang ke client.");
+          reject(line, `importing the namespace (\`* as\`) from ${targetRelative}`, "Namespace imports from a server file must not cross to the client.");
         }
         const name = ((item["local"] as AstNode | undefined)?.["name"] as string) ?? "";
         // Type-only (Addendum J.5): Babel menaruh `importKind: "type"` di
@@ -1222,8 +1222,8 @@ export async function checkClientModuleImports(
         if (name.length > 0 && !(await isAllowedServerFnImport(resolvedTarget, specifier, name))) {
           reject(
             line,
-            `mengimpor \`${name}\` dari ${targetRelative}`,
-            "Kode server tidak boleh muncul di client.\nHanya `serverFn` yang diizinkan menyeberang.",
+            `importing \`${name}\` from ${targetRelative}`,
+            "Server code must not appear in the client.\nOnly `serverFn` may cross.",
           );
         }
       }
@@ -1270,11 +1270,11 @@ export async function checkClientModuleImports(
         code: "E_ENV_IN_CLIENT",
         file: relativeFile,
         line: node.loc?.start.line ?? 1,
-        message: `memanggil \`${callText}\` di modul yang masuk client`,
-        details: "`env()` hanya legal di server.",
+        message: `calling \`${callText}\` in a client module`,
+        details: "`env()` is only legal on the server.",
         suggestions: [
-          "Pindahkan pemanggilan ke dalam serverFn, atau",
-          "Gunakan import.meta.env untuk nilai publik",
+          "Move the call into a serverFn, or",
+          "Use import.meta.env for public values",
         ],
       });
     });
@@ -1338,7 +1338,7 @@ export async function checkClientModuleImports(
 
     const targetRelative =
       resolvedTarget === null ? request.text : toRelative(projectRoot, resolvedTarget);
-    reject(request.node.loc?.start.line ?? 1, `mengimpor (dynamic) \`${request.text}\` dari ${targetRelative}`, "Client tidak boleh melakukan dynamic import ke `*.server.ts`.");
+    reject(request.node.loc?.start.line ?? 1, `importing (dynamic) \`${request.text}\` from ${targetRelative}`, "The client must not dynamically import `*.server.ts`.");
   }
 
   // `import.meta.glob` yang mencakup `*.server.ts` (§12.7) — audit adversarial M6.
@@ -1368,11 +1368,11 @@ export async function checkClientModuleImports(
         code: "E_SERVER_IMPORT_IN_CLIENT",
         file: relativeFile,
         line: node.loc?.start.line ?? 1,
-        message: `mengimpor (glob) \`${pattern}\` di modul client`,
-        details: "`import.meta.glob` yang mencakup `*.server.ts` dilarang di client.",
+        message: `importing (glob) \`${pattern}\` in a client module`,
+        details: "`import.meta.glob` patterns covering `*.server.ts` are forbidden in the client.",
         suggestions: [
-          "Import statis `serverFn` dari `*.server.ts` (hanya itu yang boleh menyeberang), atau",
-          "Pindahkan kebutuhan data ke dalam server function",
+          "Statically import the `serverFn` from `*.server.ts` (that is all that may cross), or",
+          "Move the data requirement into a server function",
         ],
       });
     }
@@ -1506,7 +1506,7 @@ export function checkRouteModuleExports(context: RouteExportCheckContext): void 
       : base === "_error.tsx" || base === "_404.tsx"
         ? ["default"]
         : ["default", "loader", "meta", "prerender", "paths", "revalidate"];
-  const allowedText = `Hanya ${allowed.map((name) => `\`${name}\``).join(", ")} yang boleh di-export.`;
+  const allowedText = `Only ${allowed.map((name) => `\`${name}\``).join(", ")} may be exported.`;
   const relativeFile = toRelative(projectRoot, file);
   const ast = parseModule(code, file);
 
@@ -1524,11 +1524,11 @@ export function checkRouteModuleExports(context: RouteExportCheckContext): void 
         code: "E_ROUTE_EXPORT_INVALID",
         file: relativeFile,
         line: statement.loc?.start.line ?? 1,
-        message: "`export *` tidak diizinkan di modul route",
+        message: "`export *` is not allowed in route modules",
         details: allowedText,
         suggestions: [
-          `Pindahkan isi file ke luar ${toRelative(projectRoot, routesDir)}/, atau`,
-          "Hapus `export *` tersebut",
+          `Move the file contents outside ${toRelative(projectRoot, routesDir)}/, or`,
+          "Remove the `export *`",
         ],
       });
     }
@@ -1564,11 +1564,11 @@ export function checkRouteModuleExports(context: RouteExportCheckContext): void 
         code: "E_ROUTE_EXPORT_INVALID",
         file: relativeFile,
         line: entry.line,
-        message: `export \`${entry.name}\` tidak diizinkan di modul route`,
+        message: `export \`${entry.name}\` is not allowed in route modules`,
         details: allowedText,
         suggestions: [
-          `Pindahkan \`${entry.name}\` ke file di luar ${toRelative(projectRoot, routesDir)}/, atau`,
-          "Hapus export tersebut",
+          `Move \`${entry.name}\` to a file outside ${toRelative(projectRoot, routesDir)}/, or`,
+          "Remove the export",
         ],
       });
     }
@@ -1578,9 +1578,9 @@ export function checkRouteModuleExports(context: RouteExportCheckContext): void 
     throw new MoonsError({
       code: "E_ROUTE_EXPORT_INVALID",
       file: relativeFile,
-      message: "modul route wajib mengekspor `default`",
-      details: "Setiap file route harus punya `export default` berupa komponen React.",
-      suggestions: ["Tambahkan `export default function Page() { ... }`"],
+      message: "route module must export `default`",
+      details: "Every route file needs an `export default` React component.",
+      suggestions: ["Add `export default function Page() { ... }`"],
     });
   }
 }

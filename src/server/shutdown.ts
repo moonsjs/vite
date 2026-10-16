@@ -36,10 +36,10 @@ export function installGracefulShutdown(
       return;
     }
     shuttingDown = true;
-    log(`[moons] menerima ${signal} — berhenti menerima koneksi, drain...`);
+    log(`[moons] received ${signal} — no longer accepting connections, draining...`);
 
     const timer = setTimeout(() => {
-      log(`[moons] drain melewati ${timeoutMs}ms — keluar paksa`);
+      log(`[moons] drain exceeded ${timeoutMs}ms — forcing exit`);
       const closeAll = (server as { closeAllConnections?: () => void }).closeAllConnections;
       try {
         closeAll?.call(server);
@@ -59,7 +59,7 @@ export function installGracefulShutdown(
     server.close(async (error?: Error) => {
       if (error !== undefined) {
         clearTimeout(timer);
-        log(`[moons] penutupan server gagal: ${error.message}`);
+        log(`[moons] server close failed: ${error.message}`);
         exit(1);
         return;
       }
@@ -70,11 +70,11 @@ export function installGracefulShutdown(
         try {
           await options.onShutdown();
         } catch (hookError) {
-          log(`[moons] onShutdown gagal: ${String(hookError)}`);
+          log(`[moons] onShutdown failed: ${String(hookError)}`);
         }
       }
       clearTimeout(timer);
-      log("[moons] shutdown selesai (drain penuh)");
+      log("[moons] shutdown complete (full drain)");
       exit(0);
     });
   };

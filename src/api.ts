@@ -25,9 +25,9 @@ export function assertApiModuleExports(code: string, file: string): string[] {
     if (statement["type"] === "ExportDefaultDeclaration") {
       throw apiError(
         file,
-        "export `default` tidak didukung di modul API",
-        "Modul `src/api` hanya mengekspor handler method bernama.",
-        ["Ganti menjadi `export const GET = (args) => …`", "Hapus export default"],
+        "export `default` is not supported in API modules",
+        "`src/api` modules only export named method handlers.",
+        ["Replace it with `export const GET = (args) => …`", "Remove the default export"],
       );
     }
     if (statement["type"] !== "ExportNamedDeclaration") {
@@ -65,20 +65,20 @@ export function assertApiModuleExports(code: string, file: string): string[] {
   if (illegal.length > 0) {
     throw apiError(
       file,
-      `export \`${illegal[0]}\` bukan handler method yang dikenal`,
-      `Handler yang legal: ${API_METHODS.join(", ")}.`,
+      `export \`${illegal[0]}\` is not a recognized method handler`,
+      `Legal handlers: ${API_METHODS.join(", ")}.`,
       [
-        "Ganti nama export menjadi salah satu method HTTP",
-        "Pindahkan helper ke modul lain (mis. `src/server/…`)",
+        "Rename the export to one of the HTTP methods",
+        "Move helpers to another module (e.g. `src/server/…`)",
       ],
     );
   }
   if (methods.length === 0) {
     throw apiError(
       file,
-      "modul API tanpa handler method",
-      `Wajib ada minimal satu dari ${API_METHODS.join(", ")}.`,
-      [`Tambahkan \`export const GET = (args) => new Response(…)\``],
+      "API module has no method handler",
+      `At least one of ${API_METHODS.join(", ")} is required.`,
+      ["Add `export const GET = (args) => new Response(…)`"],
     );
   }
 
@@ -103,11 +103,11 @@ export function assertMiddlewareExports(code: string, file: string): void {
     throw new MoonsError({
       code: "E_MIDDLEWARE_INVALID",
       file,
-      message: "`_middleware.ts` tanpa `export default`",
-      details: "Middleware direktori mengikuti bentuk `Middleware`: `(args) => Promise<Response>`.",
+      message: "`_middleware.ts` without `export default`",
+      details: "Directory middleware follows the `Middleware` shape: `(args) => Promise<Response>`.",
       suggestions: [
-        "Tambahkan `export default async ({ req, ctx, next }) => await next()`",
-        "Hapus file bila tidak dipakai",
+        "Add `export default async ({ req, ctx, next }) => await next()`",
+        "Delete the file if unused",
       ],
     });
   }

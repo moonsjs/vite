@@ -212,7 +212,7 @@ test("tanpa _404 kustom → halaman 404 bawaan", async () => {
   const response = await handler(new Request("http://localhost/tidak-ada"));
   const body = await response.text();
   expect(response.status).toBe(404);
-  expect(body).toContain("Halaman tidak ditemukan");
+  expect(body).toContain("Page not found");
 });
 
 test("loader error → _error kustom (500) dengan error dev", async () => {
@@ -250,7 +250,7 @@ test("tanpa _error kustom → halaman 500 bawaan", async () => {
   const response = await handler(new Request("http://localhost/"));
   const body = await response.text();
   expect(response.status).toBe(500);
-  expect(body).toContain("Terjadi kesalahan internal");
+  expect(body).toContain("Internal server error");
 });
 
 test("loader mengembalikan Response → E_INTERNAL sampai ke _error kustom", async () => {

@@ -14,7 +14,7 @@ export const ROOT_PLACEHOLDER = '<div id="root"></div>';
 
 export const DEFAULT_TEMPLATE = [
   "<!doctype html>",
-  '<html lang="id">',
+  '<html lang="en">',
   "<head>",
   '  <meta charset="utf-8" />',
   '  <meta name="viewport" content="width=device-width, initial-scale=1" />',
@@ -38,11 +38,11 @@ export function injectShell(
   if (!template.includes(ROOT_PLACEHOLDER)) {
     throw new MoonsError({
       code: "E_INTERNAL",
-      message: `shell HTML tidak memuat \`${ROOT_PLACEHOLDER}\``,
-      details: "index.html aplikasi wajib memuat elemen root tersebut agar SSR bisa meng-inject markup.",
+      message: `shell HTML does not contain \`${ROOT_PLACEHOLDER}\``,
+      details: "The app's index.html must contain that root element so SSR can inject markup.",
       suggestions: [
-        `Tambahkan ${ROOT_PLACEHOLDER} ke index.html`,
-        "Atau hapus index.html untuk memakai shell bawaan",
+        `Add ${ROOT_PLACEHOLDER} to index.html`,
+        "Or remove index.html to use the built-in shell",
       ],
     });
   }
@@ -119,9 +119,9 @@ export function createFileShell(options: { clientDir?: string } = {}): Shell {
         throw new MoonsError({
           code: "E_INTERNAL",
           file,
-          message: "`dist/client/index.html` tidak ditemukan",
-          details: "Build client harus dijalankan sebelum server produksi dinyalakan.",
-          suggestions: ["Jalankan `bun run build` lebih dulu"],
+          message: "`dist/client/index.html` not found",
+          details: "The client build must run before starting the production server.",
+          suggestions: ["Run `bun run build` first"],
         });
       }
       cached = readFileSync(file, "utf8");

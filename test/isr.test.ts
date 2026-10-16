@@ -53,7 +53,7 @@ test("revalidatePrerendered: leak-guard fail-closed — file lama TIDAK ditimpa"
     log: (message) => logs.push(message),
   });
   expect(readFileSync(file, "utf8")).toBe("<html>aman</html>");
-  expect(logs.join("\n")).toContain("TIDAK menulis");
+  expect(logs.join("\n")).toContain("NOT writing");
 
   await revalidatePrerendered({
     pathname: "/canary",

@@ -164,7 +164,7 @@ function expectForbidden(error: unknown, substrings: string[]): MoonsError {
   expect(error).toBeInstanceOf(MoonsError);
   const moons = error as MoonsError;
   expect(moons.code).toBe("E_FORBIDDEN_SERVER_IMPORT");
-  expect(moons.format()).toContain("Saran:");
+  expect(moons.format()).toContain("Suggestion:");
   for (const needle of substrings) {
     expect(moons.format()).toContain(needle);
   }
@@ -174,14 +174,14 @@ function expectForbidden(error: unknown, substrings: string[]): MoonsError {
 test("gate: import langsung paket bawaan → E_FORBIDDEN_SERVER_IMPORT (sumber + file:line)", async () => {
   const root = fixtureRoot();
   const error = await checkSource(root, 'import { x } from "pg";\nexport default function P() { return <div>{x}</div>; }\n');
-  const moons = expectForbidden(error, ["daftar bawaan", "probe.tsx"]);
+  const moons = expectForbidden(error, ["built-in", "probe.tsx"]);
   expect(moons.format()).toContain("pg");
 });
 
 test("gate: subpath scoped + paket marker juga ditolak", async () => {
   const root = fixtureRoot();
   const sub = await checkSource(root, 'import { r } from "@prisma/client/runtime";\nexport default function P() { return <div>{r}</div>; }\n');
-  expectForbidden(sub, ["@prisma/client", "daftar bawaan"]);
+  expectForbidden(sub, ["@prisma/client", "built-in"]);
 
   const marker = await checkSource(root, 'import { x } from "so-marked";\nexport default function P() { return <div>{x}</div>; }\n');
   expectForbidden(marker, ["marker", "serverOnly", "so-marked"]);

@@ -98,12 +98,12 @@ export const callThirdParty = serverFn({
   expect(moons.code).toBe("E_SCHEMA_LOCAL_REF");
   expect(moons.format()).toContain("pathSchema");
   expect(moons.format()).toContain("callThirdParty");
-  // A4: contoh diff "Sebelum/Sesudah" + saran konkret ada di pesan.
-  expect(moons.format()).toContain("Sebelum (ditolak):");
-  expect(moons.format()).toContain("Sesudah (pilih salah satu):");
+  // A4: contoh diff "Before/After" + saran konkret ada di pesan.
+  expect(moons.format()).toContain("Before (rejected):");
+  expect(moons.format()).toContain("After (pick one):");
   expect(moons.format()).toContain("src/shared/schemas.ts");
-  expect(moons.format()).toContain("inline schema");
-  expect(moons.format()).toContain("Saran:");
+  expect(moons.format()).toContain("inline the schema");
+  expect(moons.format()).toContain("Suggestion:");
 });
 
 test("schema inline & import dari modul shared tetap menghasilkan stub valid", () => {
@@ -229,8 +229,8 @@ test("checkClientModuleImports §12.4/§12.7/§12.8", async () => {
   const error = thrown as MoonsError;
   expect(error.code).toBe("E_SERVER_IMPORT_IN_CLIENT");
   expect(error.format()).toContain("src/routes/dashboard.tsx:1");
-  expect(error.format()).toContain("mengimpor `INTERNAL_SECRET` dari src/server/secrets.server.ts");
-  expect(error.format()).toContain("Saran:");
+  expect(error.format()).toContain("importing `INTERNAL_SECRET` from src/server/secrets.server.ts");
+  expect(error.format()).toContain("Suggestion:");
 
   const okServerFn =
     'import { getUser } from "../server/users.server";\nexport const load = () => getUser({ input: { id: "u1" } });\n';
@@ -327,8 +327,8 @@ test("env() di modul client → E_ENV_IN_CLIENT (§12.4)", async () => {
   const error = thrown as MoonsError;
   expect(error.code).toBe("E_ENV_IN_CLIENT");
   expect(error.format()).toContain("src/client/config.ts:3");
-  expect(error.format()).toContain('memanggil `env("API_KEY")` di modul yang masuk client');
-  expect(error.format()).toContain("Saran:");
+  expect(error.format()).toContain('calling `env("API_KEY")` in a client module');
+  expect(error.format()).toContain("Suggestion:");
 
   await expect(
     checkClientModuleImports({
@@ -372,8 +372,8 @@ test("checkRouteModuleExports §11.2/§12.4", () => {
   const error = thrown as MoonsError;
   expect(error.code).toBe("E_ROUTE_EXPORT_INVALID");
   expect(error.format()).toContain("src/routes/index.tsx:1");
-  expect(error.format()).toContain("export `helper` tidak diizinkan di modul route");
-  expect(error.format()).toContain("Saran:");
+  expect(error.format()).toContain("export `helper` is not allowed in route modules");
+  expect(error.format()).toContain("Suggestion:");
 
   expect(() =>
     check("_layout.tsx", "export const meta = () => ({});\nexport default function L() { return null; }\n"),
@@ -415,7 +415,7 @@ test("audit M6: import dengan query Vite (?raw/?url) ditolak bersih (§12.4)", a
   expect(thrown).toBeInstanceOf(MoonsError);
   const error = thrown as MoonsError;
   expect(error.code).toBe("E_SERVER_IMPORT_IN_CLIENT");
-  expect(error.format()).toContain("mengimpor default dari src/server/secrets.server.ts");
+  expect(error.format()).toContain("importing the default export from src/server/secrets.server.ts");
 
   // side-effect import dengan query: aman (modul tetap menjadi stub) → tidak ditolak
   await checkClientModuleImports({
@@ -443,7 +443,7 @@ test("audit M6: import.meta.glob yang mencakup *.server ditolak (§12.7)", async
     }
     expect(thrown).toBeInstanceOf(MoonsError);
     expect((thrown as MoonsError).code).toBe("E_SERVER_IMPORT_IN_CLIENT");
-    expect((thrown as MoonsError).format()).toContain("mengimpor (glob)");
+    expect((thrown as MoonsError).format()).toContain("importing (glob)");
   }
 
   await checkClientModuleImports({
@@ -472,7 +472,7 @@ test("audit M6: dynamic import template literal dengan teks .server ditolak (§1
   }
   expect(thrown).toBeInstanceOf(MoonsError);
   expect((thrown as MoonsError).code).toBe("E_SERVER_IMPORT_IN_CLIENT");
-  expect((thrown as MoonsError).format()).toContain("mengimpor (dynamic)");
+  expect((thrown as MoonsError).format()).toContain("importing (dynamic)");
 
   // template tanpa teks `.server` tetap boleh
   await checkClientModuleImports({
@@ -521,7 +521,7 @@ test("audit ronde 2: alias/resolve yang menunjuk *.server ditolak (bukan MISSING
   expect(thrown).toBeInstanceOf(MoonsError);
   expect((thrown as MoonsError).code).toBe("E_SERVER_IMPORT_IN_CLIENT");
   expect((thrown as MoonsError).format()).toContain(
-    "mengimpor `INTERNAL_SECRET` dari src/server/secrets.server.ts",
+    "importing `INTERNAL_SECRET` from src/server/secrets.server.ts",
   );
 
   await checkClientModuleImports({
@@ -572,7 +572,7 @@ test("audit ronde 2: resolve via symlink/realpath ke *.server ditolak", async ()
   }
   expect(thrown).toBeInstanceOf(MoonsError);
   expect((thrown as MoonsError).format()).toContain(
-    "mengimpor default dari src/server/secrets.server.ts",
+    "importing the default export from src/server/secrets.server.ts",
   );
 
   // resolver mengembalikan realpath secara langsung
@@ -590,7 +590,7 @@ test("audit ronde 2: resolve via symlink/realpath ke *.server ditolak", async ()
   }
   expect(thrownReal).toBeInstanceOf(MoonsError);
   expect((thrownReal as MoonsError).format()).toContain(
-    "mengimpor default dari src/server/secrets.server.ts",
+    "importing the default export from src/server/secrets.server.ts",
   );
 });
 
@@ -617,7 +617,7 @@ test("audit ronde 2: file server non-kontrak (.server.js) ditolak dengan pesan k
   }
   expect(thrown).toBeInstanceOf(MoonsError);
   expect((thrown as MoonsError).code).toBe("E_SERVER_IMPORT_IN_CLIENT");
-  expect((thrown as MoonsError).format()).toContain("ekstensi di luar kontrak");
+  expect((thrown as MoonsError).format()).toContain("extension outside the");
 
   expect(isNonContractServerFile("/x/legacy.server.js")).toBe(true);
   expect(isNonContractServerFile("/x/users.server.ts")).toBe(false);
@@ -656,6 +656,6 @@ test("audit ronde 2: resolve case-varian *.server ditolak", async () => {
   }
   expect(thrown).toBeInstanceOf(MoonsError);
   expect((thrown as MoonsError).format()).toContain(
-    "mengimpor `INTERNAL_SECRET` dari src/server/Secrets.SERVER.TS",
+    "importing `INTERNAL_SECRET` from src/server/Secrets.SERVER.TS",
   );
 });

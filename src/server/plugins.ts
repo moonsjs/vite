@@ -69,7 +69,7 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
         try {
           await plugin.onShutdown?.(app);
         } catch (error) {
-          log(`[moons] plugin \`${plugin.name}\` gagal saat onShutdown: ${String(error)}`);
+          log(`[moons] plugin \`${plugin.name}\` failed during onShutdown: ${String(error)}`);
         }
       }
     },

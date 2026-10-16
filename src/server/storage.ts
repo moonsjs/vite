@@ -21,7 +21,7 @@ export function createFileStorage(clientDir: string): PrerenderStorage {
     async write(pathname: string, body: Uint8Array): Promise<void> {
       const target = staticFileTarget(clientDir, pathname);
       if (target === null) {
-        throw new Error(`[moons] isr: path tidak valid untuk ditulis: ${pathname}`);
+        throw new Error(`[moons] isr: invalid path to write: ${pathname}`);
       }
       mkdirSync(dirname(target), { recursive: true });
       const tmp = `${target}.tmp-${process.pid}`;

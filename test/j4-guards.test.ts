@@ -229,7 +229,7 @@ test("K.1: nilai server lewat rantai re-export barrel → pesan Moons (bukan MIS
     analyze: () => analysis,
   });
   const moons = expectCode(value, "E_SERVER_IMPORT_IN_CLIENT");
-  expect(moons.message).toContain("rantai re-export");
+  expect(moons.message).toContain("re-export chain");
   expect(moons.message).toContain("secrets.server.ts");
 
   const fn = await check({

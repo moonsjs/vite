@@ -47,8 +47,8 @@ test("drain: request in-flight selesai dulu, lalu exit 0", async () => {
     await Bun.sleep(100);
 
     expect(exits).toEqual([0]);
-    expect(logs.join("\n")).toContain("drain penuh");
-    expect(logs.join("\n")).toContain("berhenti menerima koneksi");
+    expect(logs.join("\n")).toContain("full drain");
+    expect(logs.join("\n")).toContain("no longer accepting connections");
   } finally {
     (server as unknown as { closeAllConnections?: () => void }).closeAllConnections?.();
     server.close();

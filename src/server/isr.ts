@@ -57,7 +57,7 @@ async function runRevalidate(options: RevalidateOptions): Promise<void> {
       }),
     );
     if (response.status !== 200) {
-      log(`[moons] isr: lewati ${options.pathname} (status ${response.status})`);
+      log(`[moons] isr: skipped ${options.pathname} (status ${response.status})`);
       return;
     }
     const html = await response.text();
@@ -69,8 +69,8 @@ async function runRevalidate(options: RevalidateOptions): Promise<void> {
       const labels = findings
         .map((finding) => (finding.kind === "canary" ? "canary" : `env(${finding.label})`))
         .join(", ");
-      // Fail-closed: jangan menimpa file statis dengan konten bocor.
-      log(`[moons] isr: TIDAK menulis ${options.pathname} — memuat ${labels}`);
+      // Fail-closed: tidak menimpa file statis dengan konten bocor.
+      log(`[moons] isr: NOT writing ${options.pathname} — contains ${labels}`);
       return;
     }
     if (options.storage !== undefined) {
@@ -78,14 +78,14 @@ async function runRevalidate(options: RevalidateOptions): Promise<void> {
       return;
     }
     if (options.file === undefined) {
-      log(`[moons] isr: lewati ${options.pathname} — tanpa file/storage tujuan`);
+      log(`[moons] isr: skipped ${options.pathname} — no destination file/storage`);
       return;
     }
     const tmp = `${options.file}.tmp-${process.pid}`;
     writeFileSync(tmp, html);
     renameSync(tmp, options.file);
   } catch (error) {
-    log(`[moons] isr: gagal regenerasi ${options.pathname}: ${String(error)}`);
+    log(`[moons] isr: failed to regenerate ${options.pathname}: ${String(error)}`);
   }
 }
 

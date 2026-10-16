@@ -202,19 +202,19 @@ export function serverOnlyImportError(input: {
 }): MoonsError {
   const sourceLabel =
     input.source === "builtin"
-      ? "Sumber kecocokan: daftar bawaan paket server-only framework."
+      ? "Match source: framework built-in server-only package list."
       : input.source === "config"
-        ? "Sumber kecocokan: `security.serverOnlyPackages` di moons.config.ts."
-        : `Sumber kecocokan: marker \`"moons": { "serverOnly": true }\` di ${input.markerPath ?? "package.json"}.`;
+        ? "Match source: `security.serverOnlyPackages` in moons.config.ts."
+        : `Match source: marker \`"moons": { "serverOnly": true }\` in ${input.markerPath ?? "package.json"}.`;
   return new MoonsError({
     code: "E_FORBIDDEN_SERVER_IMPORT",
     file: input.relativeFile,
     line: input.line,
-    message: `mengimpor${input.dynamic === true ? " (dynamic)" : ""} \`${input.specifier}\` — paket server-only \`${input.packageName}\``,
-    details: `${sourceLabel}\nPaket server-only tidak boleh masuk bundle client.`,
+    message: `importing${input.dynamic === true ? " (dynamic)" : ""} \`${input.specifier}\` — server-only package \`${input.packageName}\``,
+    details: `${sourceLabel}\nServer-only packages must not enter the client bundle.`,
     suggestions: [
-      "Pindahkan operasi tersebut ke `*.server.ts` dan panggil lewat serverFn",
-      "Atau ganti/hapus import tersebut di modul client",
+      "Move the operation into `*.server.ts` and call it via a serverFn",
+      "Or replace/remove the import in the client module",
     ],
   });
 }

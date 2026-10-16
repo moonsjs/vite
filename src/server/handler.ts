@@ -132,9 +132,9 @@ export function createRequestHandler(
         new MoonsError({
           code: "E_API_HANDLER_INVALID",
           file: route.file,
-          message: `modul API \`${route.path}\` tidak bisa dimuat`,
-          details: "Peta `loadApi` tidak memuat route ini (build/dev tidak sinkron).",
-          suggestions: ["Jalankan ulang build / restart dev server"],
+          message: `API module \`${route.path}\` could not be loaded`,
+          details: "The `loadApi` map does not contain this route (build/dev out of sync).",
+          suggestions: ["Rebuild / restart the dev server"],
         }),
         route,
       );
@@ -151,9 +151,9 @@ export function createRequestHandler(
         new MoonsError({
           code: "E_API_HANDLER_INVALID",
           file: route.file,
-          message: "modul API tidak mengekspor objek handler",
-          details: `Modul \`${route.path}\` harus mengekspor handler method.`,
-          suggestions: ["Export `GET`/`POST`/… sebagai fungsi `(args) => Response`"],
+          message: "API module does not export a handler object",
+          details: `Module \`${route.path}\` must export method handlers.`,
+          suggestions: ["Export `GET`/`POST`/… as `(args) => Response` functions"],
         }),
         route,
       );
@@ -194,9 +194,9 @@ export function createRequestHandler(
           new MoonsError({
             code: "E_API_HANDLER_INVALID",
             file: route.file,
-            message: `handler \`${requestMethod}\` tidak mengembalikan \`Response\``,
-            details: "Handler API wajib mengembalikan `new Response(...)`.",
-            suggestions: ["Kembalikan `new Response(body, { status, headers })`"],
+            message: `handler \`${requestMethod}\` did not return a \`Response\``,
+            details: "API handlers must return `new Response(...)`.",
+            suggestions: ["Return `new Response(body, { status, headers })`"],
           }),
           route,
         );
@@ -225,13 +225,13 @@ export function createRequestHandler(
         );
         return htmlResponse(await shell(markup, payload, request.url), 404);
       } catch (error) {
-        console.error("[moons] gagal merender _404 kustom:", error);
+        console.error("[moons] failed to render custom _404:", error);
       }
     }
 
     const payload = encodeSsrPayload({ key: "", params: {}, data: {} });
     const html = await shell(
-      "<h1>404</h1><p>Halaman tidak ditemukan.</p>",
+      "<h1>404</h1><p>Page not found.</p>",
       payload,
       request.url,
     );
@@ -275,7 +275,7 @@ export function createRequestHandler(
         );
         return htmlResponse(await shell(markup, payload, request.url), 500);
       } catch (renderError) {
-        console.error("[moons] gagal merender _error kustom:", renderError);
+        console.error("[moons] failed to render custom _error:", renderError);
       }
     }
 
@@ -292,9 +292,9 @@ export function createRequestHandler(
         throw new MoonsError({
           code: "E_MIDDLEWARE_INVALID",
           file: definition.file,
-          message: "middleware direktori tidak bisa dimuat",
-          details: "Peta `loadRoute` tidak memuat `_middleware.ts` ini.",
-          suggestions: ["Restart dev server / jalankan ulang build"],
+          message: "directory middleware could not be loaded",
+          details: "The `loadRoute` map does not contain this `_middleware.ts`.",
+          suggestions: ["Restart the dev server / rebuild"],
         });
       }
       const module = (await load()) as { default?: unknown };
@@ -303,8 +303,8 @@ export function createRequestHandler(
         throw new MoonsError({
           code: "E_MIDDLEWARE_INVALID",
           file: definition.file,
-          message: "`_middleware.ts` tidak meng-export default fungsi",
-          details: "Middleware direktori mengikuti bentuk `(args) => Promise<Response>`.",
+          message: "`_middleware.ts` does not default-export a function",
+          details: "Directory middleware follows the `(args) => Promise<Response>` shape.",
           suggestions: ["Export default `async ({ req, ctx, next }) => await next()`"],
         });
       }
@@ -324,9 +324,9 @@ export function createRequestHandler(
         throw new MoonsError({
           code: "E_MIDDLEWARE_INVALID",
           file: definition.file,
-          message: "middleware API tidak bisa dimuat",
-          details: "Peta `loadApiMiddleware` tidak memuat `_middleware.ts` ini.",
-          suggestions: ["Restart dev server / jalankan ulang build"],
+          message: "API middleware could not be loaded",
+          details: "The `loadApiMiddleware` map does not contain this `_middleware.ts`.",
+          suggestions: ["Restart the dev server / rebuild"],
         });
       }
       const module = (await load()) as { default?: unknown };
@@ -334,8 +334,8 @@ export function createRequestHandler(
         throw new MoonsError({
           code: "E_MIDDLEWARE_INVALID",
           file: definition.file,
-          message: "`_middleware.ts` tidak meng-export default fungsi",
-          details: "Middleware direktori mengikuti bentuk `(args) => Promise<Response>`.",
+          message: "`_middleware.ts` does not default-export a function",
+          details: "Directory middleware follows the `(args) => Promise<Response>` shape.",
           suggestions: ["Export default `async ({ req, ctx, next }) => await next()`"],
         });
       }
@@ -385,7 +385,7 @@ export function createRequestHandler(
               middlewares,
               ctx,
               () => handleApiRequest(apiMatch.route, apiMatch.params, request, ctx),
-              { code: "E_MIDDLEWARE_INVALID", label: "middleware API" },
+              { code: "E_MIDDLEWARE_INVALID", label: "API middleware" },
             )(request);
           }
         }
@@ -404,7 +404,7 @@ export function createRequestHandler(
             middlewares,
             ctx,
             () => renderRoute(resolved, request, ctx),
-            { code: "E_MIDDLEWARE_INVALID", label: "middleware direktori" },
+            { code: "E_MIDDLEWARE_INVALID", label: "directory middleware" },
           )(request);
         } catch (error) {
           // Addendum B.2: sinyal routing dari loader/meta.
@@ -538,9 +538,9 @@ async function loadModules(
       if (load === undefined) {
         throw new MoonsError({
           code: "E_INTERNAL",
-          message: `modul route \`${key}\` tidak terdaftar`,
-          details: "Registry route tidak sinkron dengan hasil scan.",
-          suggestions: ["Jalankan ulang `bun run build`, atau restart dev server"],
+          message: `route module \`${key}\` is not registered`,
+          details: "The route registry is out of sync with the scan result.",
+          suggestions: ["Run `bun run build` again, or restart the dev server"],
         });
       }
       return await load();
@@ -561,11 +561,11 @@ async function runRouteMeta(
     throw new MoonsError({
       code: "E_INTERNAL",
       file,
-      message: "export `meta` harus berupa fungsi `({ data }) => RouteMeta`",
-      details: "Bentuk `meta` mengikuti ",
+      message: "export `meta` must be a function `({ data }) => RouteMeta`",
+      details: "The `meta` shape follows `RouteMeta`.",
       suggestions: [
-        "Ubah menjadi `export const meta = ({ data }) => ({ title: \"...\" })`",
-        "Atau hapus export `meta`",
+        "Change it to `export const meta = ({ data }) => ({ title: \"...\" })`",
+        "Or remove the `meta` export",
       ],
     });
   }
@@ -574,9 +574,9 @@ async function runRouteMeta(
     throw new MoonsError({
       code: "E_INTERNAL",
       file,
-      message: "`meta()` harus mengembalikan objek RouteMeta",
-      details: "Nilai yang dikembalikan dipakai untuk <title>/description/og.",
-      suggestions: ["Kembalikan objek, mis. `({ title: \"Halaman\" })`"],
+      message: "`meta()` must return a RouteMeta object",
+      details: "The returned value is used for <title>/description/og.",
+      suggestions: ["Return an object, e.g. `({ title: \"Home\" })`"],
     });
   }
   return result as Record<string, unknown>;
@@ -589,13 +589,13 @@ function apiErrorResponse(error: unknown, route: ApiRouteDefinition): Response {
   const isProduction = process.env["NODE_ENV"] === "production";
   if (error instanceof MoonsError) {
     console.error(`[moons] API ${route.path}: ${error.format()}`);
-    return new Response(isProduction ? "Terjadi kesalahan internal." : error.format(), {
+    return new Response(isProduction ? "Internal server error." : error.format(), {
       status: 500,
       headers: { "content-type": "text/plain; charset=utf-8" },
     });
   }
   console.error(`[moons] API ${route.path}:`, error);
-  return new Response(isProduction ? "Terjadi kesalahan internal." : String(error), {
+  return new Response(isProduction ? "Internal server error." : String(error), {
     status: 500,
     headers: { "content-type": "text/plain; charset=utf-8" },
   });
@@ -609,10 +609,10 @@ function internalErrorResponse(error: unknown, options: { log?: boolean } = {}):
   const detail =
     process.env["NODE_ENV"] !== "production" && error instanceof MoonsError
       ? `<pre>${escapeHtml(error.format())}</pre>`
-      : "<p>Terjadi kesalahan internal.</p>";
+      : "<p>Internal server error.</p>";
 
   return htmlResponse(
-    `<!doctype html><html lang="id"><head><meta charset="utf-8"><title>500</title></head><body><h1>500</h1>${detail}</body></html>`,
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>500</title></head><body><h1>500</h1>${detail}</body></html>`,
     500,
   );
 }
@@ -667,7 +667,7 @@ function warnPayloadFindings(
     }
     warned.add(label);
     console.warn(
-      `[moons] peringatan dev: payload SSR memuat ${label} — jangan mengembalikan rahasia dari loader.`,
+      `[moons] dev warning: SSR payload contains ${label} — do not return secrets from loaders.`,
     );
   }
 }

@@ -36,7 +36,7 @@ export function emptyDevtoolsData(): DevtoolsData {
 export function renderDevtoolsHtml(data: DevtoolsData): string {
   const rows = (items: DevtoolsRoute[]): string =>
     items.length === 0
-      ? '<tr><td colspan="3" class="muted">(kosong)</td></tr>'
+      ? '<tr><td colspan="3" class="muted">(empty)</td></tr>'
       : items
           .map(
             (item) =>
@@ -46,7 +46,7 @@ export function renderDevtoolsHtml(data: DevtoolsData): string {
 
   const fnRows =
     data.serverFns.length === 0
-      ? '<tr><td colspan="3" class="muted">(tidak ada serverFn)</td></tr>'
+      ? '<tr><td colspan="3" class="muted">(no serverFn)</td></tr>'
       : data.serverFns
           .map(
             (fn) =>
@@ -55,11 +55,11 @@ export function renderDevtoolsHtml(data: DevtoolsData): string {
           .join("\n");
 
   const canary = data.canary
-    ? '<span class="ok">aktif</span> (canary terpasang)'
-    : '<span class="muted">nonaktif</span> (tanpa canary)';
+    ? '<span class="ok">enabled</span> (canary installed)'
+    : '<span class="muted">disabled</span> (no canary)';
 
   return `<!doctype html>
-<html lang="id">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

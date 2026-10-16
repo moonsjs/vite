@@ -80,11 +80,11 @@ export async function runPrerender(options: PrerenderOptions): Promise<Prerender
         throw new MoonsError({
           code: "E_ISR_INVALID",
           file: route.file,
-          message: "`revalidate` tidak valid atau dipakai tanpa `prerender = true`",
-          details: "ISR berbasis file: `revalidate` (detik, number >= 0) + `prerender`.",
+          message: "`revalidate` is invalid or used without `prerender = true`",
+          details: "File-based ISR: `revalidate` (seconds, number >= 0) + `prerender`.",
           suggestions: [
-            "Gunakan angka detik, mis. `export const revalidate = 60`",
-            "Tambahkan `export const prerender = true` pada page yang sama",
+            "Use a number of seconds, e.g. `export const revalidate = 60`",
+            "Add `export const prerender = true` to the same page",
           ],
         });
       }
@@ -92,7 +92,7 @@ export async function runPrerender(options: PrerenderOptions): Promise<Prerender
 
     if (prerender !== true) {
       if (prerender !== undefined && prerender !== false) {
-        throw prerenderError(route, "`prerender` harus boolean (`true`/`false`)");
+        throw prerenderError(route, "`prerender` must be a boolean (`true`/`false`)");
       }
       continue;
     }
@@ -107,15 +107,15 @@ export async function runPrerender(options: PrerenderOptions): Promise<Prerender
       );
 
       if (response.status === 404) {
-        log(`[moons] prerender: lewati ${pathname} (notFound)`);
+        log(`[moons] prerender: skipped ${pathname} (notFound)`);
         skipped += 1;
         continue;
       }
       if (response.status >= 300 && response.status < 400) {
-        throw prerenderError(route, `\`redirect()\` tidak didukung saat prerender (${pathname})`);
+        throw prerenderError(route, `\`redirect()\` is not supported during prerender (${pathname})`);
       }
       if (response.status !== 200) {
-        throw prerenderError(route, `status ${response.status} saat merender ${pathname}`);
+        throw prerenderError(route, `status ${response.status} while rendering ${pathname}`);
       }
 
       const html = await response.text();
@@ -152,7 +152,7 @@ export async function runPrerender(options: PrerenderOptions): Promise<Prerender
 
   const extras = [...(wrote404 ? [NOT_FOUND_FILE] : []), ...emitted];
   log(
-    `[moons] prerender selesai: ${written} file${extras.length > 0 ? ` + ${extras.join(" + ")}` : ""} (${skipped} dilewati)`,
+    `[moons] prerender done: ${written} file${extras.length > 0 ? ` + ${extras.join(" + ")}` : ""} (${skipped} skipped)`,
   );
   return { written, skipped };
 }
@@ -237,7 +237,7 @@ async function renderStaticNotFound(
   );
   if (response.status !== 404) {
     log(
-      `[moons] prerender: ${NOT_FOUND_FILE} dilewati (sentinel \`${NOT_FOUND_SENTINEL}\` → ${response.status})`,
+      `[moons] prerender: ${NOT_FOUND_FILE} skipped (sentinel \`${NOT_FOUND_SENTINEL}\` → ${response.status})`,
     );
     return null;
   }
@@ -267,11 +267,11 @@ function assertNoLeak(
   throw new MoonsError({
     code: "E_PRERENDER_LEAK",
     file,
-    message: `hasil prerender \`${pathname}\` memuat ${labels}`,
-    details: "HTML statis permanen — rahasia yang ter-prerender tidak bisa ditarik kembali.",
+    message: `prerender output \`${pathname}\` contains ${labels}`,
+    details: "Static HTML is permanent — a prerendered secret cannot be retracted.",
     suggestions: [
-      "Jangan mengembalikan nilai env rahasia dari loader yang di-prerender",
-      "Matikan `prerender` untuk route ini atau pindahkan datanya ke serverFn request-time",
+      "Do not return secret env values from a loader that runs at prerender time",
+      "Turn off `prerender` for this route or move the data to a request-time serverFn",
     ],
   });
 }
@@ -291,37 +291,37 @@ async function resolvePathnames(route: RouteDefinition, module: RouteModule): Pr
     throw new MoonsError({
       code: "E_PRERENDER_NO_PATHS",
       file: route.file,
-      message: "route dynamic ber-`prerender = true` tanpa `export const paths`",
-      details: "Prerender butuh daftar param untuk merender tiap path.",
+      message: "dynamic route with `prerender = true` without `export const paths`",
+      details: "Prerendering needs a param list to render each path.",
       suggestions: [
-        'Tambahkan `export const paths = () => [{ id: "…" }]`',
-        "Atau hapus `prerender` agar dirender SSR saat request",
+        'Add `export const paths = () => [{ id: "…" }]`',
+        "Or remove `prerender` so the route renders at request time (SSR)",
       ],
     });
   }
 
   const raw = await (paths as () => unknown | Promise<unknown>)();
   if (!Array.isArray(raw)) {
-    throw prerenderError(route, "`paths()` harus mengembalikan array");
+    throw prerenderError(route, "`paths()` must return an array");
   }
 
   const expected = new Set(route.params);
   const result: string[] = [];
   for (const item of raw as unknown[]) {
     if (item === null || typeof item !== "object" || Array.isArray(item)) {
-      throw prerenderError(route, "item `paths()` harus objek param string");
+      throw prerenderError(route, "`paths()` items must be objects with string params");
     }
     const record = item as Record<string, unknown>;
     const keys = Object.keys(record);
     for (const name of expected) {
       const value = record[name];
       if (typeof value !== "string" || value.length === 0) {
-        throw prerenderError(route, `param \`${name}\` wajib string non-kosong`);
+        throw prerenderError(route, `param \`${name}\` must be a non-empty string`);
       }
     }
     for (const key of keys) {
       if (!expected.has(key)) {
-        throw prerenderError(route, `param \`${key}\` tidak ada di pola route`);
+        throw prerenderError(route, `param \`${key}\` is not in the route pattern`);
       }
     }
     result.push(buildPathname(route, record as Record<string, string>));
@@ -356,7 +356,7 @@ function buildPathname(route: RouteDefinition, params: Record<string, string>): 
 
 function encodeSegment(route: RouteDefinition, value: string): string {
   if (value.length === 0 || /^\.+$/.test(value)) {
-    throw prerenderError(route, `nilai param \`${value}\` tidak valid untuk path file`);
+    throw prerenderError(route, `param value \`${value}\` is not valid for a file path`);
   }
   return encodeURIComponent(value);
 }
@@ -368,9 +368,9 @@ function outputFile(clientDir: string, pathname: string): string {
   if (file !== base && !file.startsWith(base + sep)) {
     throw new MoonsError({
       code: "E_PRERENDER_INVALID",
-      message: `path prerender keluar dari direktori client (\`${pathname}\`)`,
-      details: "Nama file harus berada di dalam `dist/client`.",
-      suggestions: ["Periksa nilai param `paths` — jangan memakai `..`"],
+      message: `prerender path escapes the client directory (\`${pathname}\`)`,
+      details: "The file name must stay inside `dist/client`.",
+      suggestions: ["Check the `paths` param values — do not use `..`"],
     });
   }
   return file;
@@ -381,10 +381,10 @@ function prerenderError(route: RouteDefinition, message: string): MoonsError {
     code: "E_PRERENDER_INVALID",
     file: route.file,
     message,
-    details: "Kontrak prerender mengikuti.",
+    details: "The prerender contract is enforced.",
     suggestions: [
-      "Perbaiki bentuk `paths`/param agar cocok dengan pola route",
-      "Jangan memakai `redirect()` pada route yang di-prerender",
+      "Fix the `paths`/params shape so it matches the route pattern",
+      "Do not use `redirect()` on a prerendered route",
     ],
   });
 }

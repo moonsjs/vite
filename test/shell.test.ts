@@ -45,5 +45,5 @@ test("injectShell tanpa placeholder → E_INTERNAL dengan saran", () => {
   expect(thrown).toBeInstanceOf(MoonsError);
   const error = thrown as MoonsError;
   expect(error.code).toBe("E_INTERNAL");
-  expect(error.format()).toContain("Saran:");
+  expect(error.format()).toContain("Suggestion:");
 });

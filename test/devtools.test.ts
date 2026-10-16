@@ -22,7 +22,7 @@ test("Addendum I.4: devtools merender route, fn registry, dan status payload-sca
   expect(html).toContain("0f0e0d0c0b0a0908");
   expect(html).toContain("addNote");
   expect(html).toContain("/api/webhooks/:provider");
-  expect(html).toContain("aktif");
+  expect(html).toContain("enabled");
   expect(html).toContain("0.1.12");
   expect(html).toContain("Routes (3)");
   expect(html).toContain("serverFn registry (1)");
@@ -40,7 +40,7 @@ test("Addendum I.4: devtools meng-escape nilai (tidak ada HTML injection)", () =
 
 test("Addendum I.4: devtools menampilkan keadaan kosong", () => {
   const html = renderDevtoolsHtml(emptyDevtoolsData());
-  expect(html).toContain("(kosong)");
-  expect(html).toContain("(tidak ada serverFn)");
-  expect(html).toContain("nonaktif");
+  expect(html).toContain("(empty)");
+  expect(html).toContain("(no serverFn)");
+  expect(html).toContain("disabled");
 });

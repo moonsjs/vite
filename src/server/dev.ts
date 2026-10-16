@@ -78,7 +78,7 @@ export function installDevMiddleware(
       } catch (error) {
         res.statusCode = 500;
         res.setHeader("content-type", "text/plain; charset=utf-8");
-        res.end(`[moons] devtools gagal dirender: ${String(error)}`);
+        res.end(`[moons] devtools failed to render: ${String(error)}`);
       }
       return;
     }

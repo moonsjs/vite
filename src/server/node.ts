@@ -18,7 +18,7 @@ export class InvalidRequestError extends Error {
 export class BodyLimitError extends Error {
   readonly limit: number;
   constructor(limit: number) {
-    super(`request body melebihi batas ${limit} byte`);
+    super(`request body exceeds the ${limit} byte limit`);
     this.name = "BodyLimitError";
     this.limit = limit;
   }
@@ -48,7 +48,7 @@ export function resolveRequestUrl(
   try {
     return new URL(`${proto ?? "http"}://${host}${req.url ?? "/"}`);
   } catch {
-    throw new InvalidRequestError(`header Host tidak valid: ${JSON.stringify(hostHeader)}`);
+    throw new InvalidRequestError(`invalid Host header: ${JSON.stringify(hostHeader)}`);
   }
 }
 

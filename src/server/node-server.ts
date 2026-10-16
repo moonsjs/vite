@@ -366,13 +366,13 @@ function rpcBodyTooLargeText(limit: number, size: number | null): string {
     code: "E_RPC_BODY_TOO_LARGE",
     message:
       size === null
-        ? `body melebihi limit ${megabytes(limit)} MB`
-        : `body ${megabytes(size)} MB melebihi limit ${megabytes(limit)} MB`,
+        ? `body exceeds the ${megabytes(limit)} MB limit`
+        : `body ${megabytes(size)} MB exceeds the ${megabytes(limit)} MB limit`,
     details:
-      "Body melebihi `security.bodyLimitBytes`; pembacaan dihentikan di transport sebelum penuh.",
+      "Body exceeds `security.bodyLimitBytes`; reading stops at the transport before the body is fully buffered.",
     suggestions: [
-      "Kurangi ukuran payload, atau",
-      "Naikkan security.bodyLimitBytes jika memang perlu",
+      "Reduce the payload size, or",
+      "Increase security.bodyLimitBytes if you really need to",
     ],
   }).format();
 }
@@ -524,7 +524,7 @@ function scheduleRevalidation(input: {
       if (logger !== null) {
         logger({ msg: "isr:revalidate-failed", level: "warn", path: normalized, error: message });
       } else {
-        console.error(`[moons] isr regenerasi gagal (${normalized}): ${message}`);
+        console.error(`[moons] isr regeneration failed (${normalized}): ${message}`);
       }
     });
 }
