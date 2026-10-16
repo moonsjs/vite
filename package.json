@@ -40,7 +40,7 @@
   },
   "dependencies": {
     "@babel/parser": "^8.0.7",
-    "@moonsjs/core": "workspace:*",
+    "@moonsjs/core": "^0.1.0",
     "@moonsjs/react": "^0.1.0",
     "@moonsjs/server": "^0.1.0"
   },
