@@ -9,10 +9,12 @@ import {
   BodyLimitError,
   DEFAULT_SECURITY_HEADERS,
   InvalidRequestError,
+  resolveClientIp,
   resolveRequestUrl,
   sendNodeResponse,
   toWebRequest,
 } from "./node";
+import { createLogger, type Logger } from "./logger";
 import type { PluginRuntime } from "./plugins";
 import { installGracefulShutdown } from "./shutdown";
 
@@ -64,6 +66,8 @@ export interface NodeServerOptions {
   trustProxy?: boolean;
   /** Addendum J.2: batas body RPC di transport (default `DEFAULT_BODY_LIMIT_BYTES`). */
   bodyLimitBytes?: number;
+  /** Addendum L.3: log akses terstruktur (default senyap). */
+  logging?: { accessLog?: boolean; json?: boolean; redact?: string[] };
 }
 
 /**
@@ -77,7 +81,29 @@ export function startNodeServer(
   const clientDir = resolve(options.clientDir ?? join(process.cwd(), "dist/client"));
   const port = options.port ?? Number(process.env["PORT"] ?? 3000);
 
+  const accessLogger: Logger | null =
+    options.logging?.accessLog === true
+      ? createLogger({
+          json: options.logging.json !== false,
+          redact: options.logging.redact ?? [],
+        })
+      : null;
+
   const server = createServer((req, res) => {
+    const requestStartedAt = performance.now();
+    if (accessLogger !== null) {
+      res.once("finish", () => {
+        const ip = resolveClientIp(req, options.trustProxy === true);
+        accessLogger({
+          msg: "request",
+          method: req.method ?? "GET",
+          path: req.url ?? "/",
+          status: res.statusCode,
+          durationMs: Math.round(performance.now() - requestStartedAt),
+          ...(ip === null ? {} : { ip }),
+        });
+      });
+    }
     void (async () => {
       let url: URL;
       try {
@@ -106,6 +132,7 @@ export function startNodeServer(
                 handler,
                 options,
                 clientDir,
+                logger: accessLogger,
               });
               res.statusCode = 200;
               res.setHeader("content-type", contentTypeForPathname(url.pathname));
@@ -129,6 +156,7 @@ export function startNodeServer(
                 handler,
                 options,
                 clientDir,
+                logger: accessLogger,
               });
               const body = readFileSync(staticFile);
               const stat = statSync(staticFile);
@@ -444,6 +472,7 @@ function scheduleRevalidation(input: {
   handler: (request: Request) => Promise<Response>;
   options: NodeServerOptions;
   clientDir: string;
+  logger?: Logger | null;
 }): void {
   const normalized = input.pathname.length > 1 ? input.pathname.replace(/\/+$/, "") : input.pathname;
   const seconds = readPrerenderManifest(input.clientDir).revalidate.get(normalized);
@@ -453,6 +482,8 @@ function scheduleRevalidation(input: {
   if (!shouldRevalidate({ mtimeMs: input.mtimeMs, revalidateSeconds: seconds })) {
     return;
   }
+  const regeneratedAt = performance.now();
+  const logger = input.logger ?? null;
   void revalidatePrerendered({
     pathname: normalized,
     ...(input.file === undefined ? {} : { file: input.file }),
@@ -460,6 +491,21 @@ function scheduleRevalidation(input: {
     handler: input.handler,
     ...(input.options.canary === undefined ? {} : { canary: input.options.canary }),
     env: process.env,
-  });
+  })
+    .then(() => {
+      logger?.({
+        msg: "isr:regenerated",
+        path: normalized,
+        durationMs: Math.round(performance.now() - regeneratedAt),
+      });
+    })
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      if (logger !== null) {
+        logger({ msg: "isr:revalidate-failed", level: "warn", path: normalized, error: message });
+      } else {
+        console.error(`[moons] isr regenerasi gagal (${normalized}): ${message}`);
+      }
+    });
 }
 

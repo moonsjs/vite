@@ -576,7 +576,7 @@ function renderServerEntryBuild(
     "  onContext: (ctx) => plugins.applyExtensions(ctx),",
     "});",
     "",
-    `startNodeServer(handler, { plugins, headers: config.headers, storage: config.isr?.storage, trustProxy: config.security?.trustProxy, bodyLimitBytes: config.security?.bodyLimitBytes${canary === undefined ? "" : `, canary: ${JSON.stringify(canary)}`} });`,
+    `startNodeServer(handler, { plugins, headers: config.headers, storage: config.isr?.storage, trustProxy: config.security?.trustProxy, bodyLimitBytes: config.security?.bodyLimitBytes, logging: config.logging${canary === undefined ? "" : `, canary: ${JSON.stringify(canary)}`} });`,
     "",
   ].join("\n");
 }
