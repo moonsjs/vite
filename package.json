@@ -1,0 +1,59 @@
+{
+  "name": "@moonsjs/vite",
+  "version": "0.1.6",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moonsjs/vite.git"
+  },
+  "homepage": "https://github.com/moonsjs/docs",
+  "bugs": {
+    "url": "https://github.com/moonsjs/vite/issues"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "bun": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./src/server/index.ts",
+      "bun": "./src/server/index.ts",
+      "default": "./dist/server/index.js"
+    },
+    "./transform": {
+      "types": "./src/transform.ts",
+      "bun": "./src/transform.ts",
+      "default": "./dist/transform.js"
+    }
+  },
+  "scripts": {
+    "prepack": "bun run build",
+    "build": "rm -rf dist && tsc -p tsconfig.json --emitDeclarationOnly && bun build src/index.ts src/server/index.ts src/transform.ts --outdir dist --target node --format esm --splitting --sourcemap=external --external @moonsjs/core --external '@moonsjs/core/*' --external @moonsjs/react --external '@moonsjs/react/*' --external @moonsjs/server --external '@moonsjs/server/*' --external @babel/parser --external vite",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@babel/parser": "^8.0.7",
+    "@moonsjs/core": "^0.1.0",
+    "@moonsjs/react": "^0.1.0",
+    "@moonsjs/server": "^0.1.0"
+  },
+  "peerDependencies": {
+    "vite": "^8.3.4"
+  },
+  "devDependencies": {
+    "vite": "^8.3.4",
+    "typescript": "^7.0.2",
+    "@types/bun": "^1.4.3",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0"
+  }
+}

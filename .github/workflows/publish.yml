@@ -1,0 +1,24 @@
+name: publish
+# Trusted Publishing (OIDC, tanpa token): siapkan "Trusted Publisher" di
+# npmjs.com untuk paket ini (repo moonsjs/<name>, workflow publish.yml).
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: npm publish --provenance --access public
