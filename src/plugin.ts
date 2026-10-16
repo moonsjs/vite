@@ -57,6 +57,9 @@ export default function moons(options: MoonsVitePluginOptions = {}): Plugin {
   let configFilePath = "";
   let routesDir = "";
   let serverOnlyPackages: ReadonlyArray<string> = [];
+  // Addendum J.1/J.2: paritas dev & produksi (paritas E7).
+  let trustProxy = false;
+  let bodyLimitBytes: number | undefined;
   let apiDir = "";
   let apiRoutes: ApiRouteDefinition[] = [];
   let apiMiddlewares: ApiMiddlewareDefinition[] = [];
@@ -246,6 +249,8 @@ export default function moons(options: MoonsVitePluginOptions = {}): Plugin {
       const config = validateConfig(raw, { file: configFilePath, projectRoot: root });
       routesDir = resolvePath(root, config.routesDir);
       serverOnlyPackages = config.security?.serverOnlyPackages ?? [];
+      trustProxy = config.security?.trustProxy === true;
+      bodyLimitBytes = config.security?.bodyLimitBytes;
 
       // Addendum D.1: scan + validasi statis modul `src/api`.
       apiDir = resolvePath(root, config.apiDir ?? "src/api");
@@ -367,6 +372,8 @@ export default function moons(options: MoonsVitePluginOptions = {}): Plugin {
           },
           analyze: (absoluteFile) => analysisCache.get(absoluteFile) ?? analyzeFile(absoluteFile),
           apiDir,
+          configFile: configFilePath,
+          serverDir: resolvePath(root, "src/server"),
           serverOnlyPackages,
           packageCache,
         });
@@ -457,6 +464,8 @@ export default function moons(options: MoonsVitePluginOptions = {}): Plugin {
         ...(apiRoutes.length === 0
           ? {}
           : { apiPrefix: `/${apiDir.split(/[\\/]/).filter((part) => part.length > 0).pop() ?? "api"}` }),
+        trustProxy,
+        ...(bodyLimitBytes === undefined ? {} : { bodyLimitBytes }),
       });
       server.config.logger.info("[moons] devtools: /__moons/devtools");
     },
@@ -567,7 +576,7 @@ function renderServerEntryBuild(
     "  onContext: (ctx) => plugins.applyExtensions(ctx),",
     "});",
     "",
-    `startNodeServer(handler, { plugins, headers: config.headers, storage: config.isr?.storage${canary === undefined ? "" : `, canary: ${JSON.stringify(canary)}`} });`,
+    `startNodeServer(handler, { plugins, headers: config.headers, storage: config.isr?.storage, trustProxy: config.security?.trustProxy, bodyLimitBytes: config.security?.bodyLimitBytes${canary === undefined ? "" : `, canary: ${JSON.stringify(canary)}`} });`,
     "",
   ].join("\n");
 }

@@ -1,10 +1,17 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { extname, join, resolve, sep } from "node:path";
-import type { PrerenderStorage } from "@moonsjs/core";
+import { DEFAULT_BODY_LIMIT_BYTES, MoonsError, type PrerenderStorage } from "@moonsjs/core";
 import { revalidatePrerendered, shouldRevalidate } from "./isr";
 import { contentTypeForPathname } from "./storage";
-import { sendNodeResponse, toWebRequest } from "./node";
+import {
+  BodyLimitError,
+  DEFAULT_SECURITY_HEADERS,
+  InvalidRequestError,
+  resolveRequestUrl,
+  sendNodeResponse,
+  toWebRequest,
+} from "./node";
 import type { PluginRuntime } from "./plugins";
 import { installGracefulShutdown } from "./shutdown";
 
@@ -52,6 +59,10 @@ export interface NodeServerOptions {
    * memakai storage ini; default: file sistem lokal.
    */
   storage?: PrerenderStorage;
+  /** Addendum J.1: percayai `x-forwarded-proto`/`x-forwarded-host` (default false). */
+  trustProxy?: boolean;
+  /** Addendum J.2: batas body RPC di transport (default `DEFAULT_BODY_LIMIT_BYTES`). */
+  bodyLimitBytes?: number;
 }
 
 /**
@@ -67,9 +78,21 @@ export function startNodeServer(
 
   const server = createServer((req, res) => {
     void (async () => {
+      let url: URL;
       try {
-        const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+        // Addendum J.1: URL/Origin mengikuti `x-forwarded-*` bila trustProxy aktif;
+        // request malformed → 400 (bukan 500 + stack).
+        url = resolveRequestUrl(req, { trustProxy: options.trustProxy === true });
+      } catch (error) {
+        if (error instanceof InvalidRequestError) {
+          console.warn(`[moons] ${error.message} — 400`);
+          respondBadRequest(res);
+          return;
+        }
+        throw error;
+      }
 
+      try {
         if (req.method === "GET" || req.method === "HEAD") {
           // Addendum I: storage bersama (bila dikonfigurasi) menggantikan file lokal.
           if (options.storage !== undefined) {
@@ -85,11 +108,7 @@ export function startNodeServer(
               });
               res.statusCode = 200;
               res.setHeader("content-type", contentTypeForPathname(url.pathname));
-              for (const [name, value] of Object.entries(options.headers ?? {})) {
-                if (!res.hasHeader(name)) {
-                  res.setHeader(name, value);
-                }
-              }
+              applyStaticHeaders(res, url.pathname, options.headers);
               res.end(req.method === "HEAD" ? undefined : Buffer.from(entry.body));
               return;
             }
@@ -107,20 +126,44 @@ export function startNodeServer(
               const body = readFileSync(staticFile);
               res.statusCode = 200;
               res.setHeader("content-type", MIME_TYPES[extname(staticFile).toLowerCase()] ?? "application/octet-stream");
-              for (const [name, value] of Object.entries(options.headers ?? {})) {
-                if (!res.hasHeader(name)) {
-                  res.setHeader(name, value);
-                }
-              }
+              applyStaticHeaders(res, url.pathname, options.headers);
               res.end(req.method === "HEAD" ? undefined : body);
               return;
             }
           }
         }
 
-        const response = await handler(await toWebRequest(req));
+        // Addendum J.2: batas body RPC ditegakkan di transport — lebih awal dari
+        // pipeline, tanpa membaca penuh; `content-length` diperiksa lebih dulu.
+        const isRpc = url.pathname.startsWith("/_moons/fn/");
+        const rpcLimit = options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES;
+        if (isRpc) {
+          const contentLength = Number(req.headers["content-length"] ?? "0");
+          if (Number.isFinite(contentLength) && contentLength > rpcLimit) {
+            res.statusCode = 413;
+            res.setHeader("content-type", "text/plain; charset=utf-8");
+            res.end(rpcBodyTooLargeText(rpcLimit, contentLength));
+            res.once("finish", () => req.destroy());
+            return;
+          }
+        }
+
+        const request = await toWebRequest(req, {
+          trustProxy: options.trustProxy === true,
+          ...(isRpc ? { maxBodyBytes: rpcLimit } : {}),
+        });
+        const response = await handler(request);
         await sendNodeResponse(res, response);
       } catch (error) {
+        if (error instanceof BodyLimitError) {
+          const isRpc = url.pathname.startsWith("/_moons/fn/");
+          res.statusCode = 413;
+          res.setHeader("content-type", "text/plain; charset=utf-8");
+          res.end(isRpc ? rpcBodyTooLargeText(error.limit, null) : "Payload Too Large");
+          // Sisa body tidak perlu dibaca — putuskan setelah respons terkirim.
+          res.once("finish", () => req.destroy());
+          return;
+        }
         console.error("[moons] server error:", error);
         res.statusCode = 500;
         res.setHeader("content-type", "text/plain; charset=utf-8");
@@ -157,6 +200,54 @@ export function startNodeServer(
   }
 
   return server;
+}
+
+/**
+ * Addendum J.7: header konfigurasi (menang), default aman, dan
+ * `Cache-Control: immutable` untuk aset ber-hash di `/assets/*`.
+ */
+function applyStaticHeaders(
+  res: import("node:http").ServerResponse,
+  pathname: string,
+  configured: Record<string, string> | undefined,
+): void {
+  for (const [name, value] of Object.entries(configured ?? {})) {
+    if (!res.hasHeader(name)) {
+      res.setHeader(name, value);
+    }
+  }
+  for (const [name, value] of Object.entries(DEFAULT_SECURITY_HEADERS)) {
+    if (!res.hasHeader(name)) {
+      res.setHeader(name, value);
+    }
+  }
+  if (pathname.startsWith("/assets/") && !res.hasHeader("cache-control")) {
+    res.setHeader("cache-control", "public, max-age=31536000, immutable");
+  }
+}
+
+function respondBadRequest(res: import("node:http").ServerResponse): void {
+  res.statusCode = 400;
+  res.setHeader("content-type", "text/plain; charset=utf-8");
+  res.end("Bad Request");
+}
+
+/** 413 transport dengan format §15 yang sama seperti `rpc.ts` (Addendum J.2). */
+function rpcBodyTooLargeText(limit: number, size: number | null): string {
+  const megabytes = (bytes: number): string => (bytes / 1_000_000).toFixed(1);
+  return new MoonsError({
+    code: "E_RPC_BODY_TOO_LARGE",
+    message:
+      size === null
+        ? `body melebihi limit ${megabytes(limit)} MB`
+        : `body ${megabytes(size)} MB melebihi limit ${megabytes(limit)} MB`,
+    details:
+      "Body melebihi `security.bodyLimitBytes`; pembacaan dihentikan di transport sebelum penuh.",
+    suggestions: [
+      "Kurangi ukuran payload, atau",
+      "Naikkan security.bodyLimitBytes jika memang perlu",
+    ],
+  }).format();
 }
 
 /** Resolve file static dengan proteksi path traversal (+ manifest prerender D.5). */

@@ -5,7 +5,14 @@ import type { PayloadScanOptions } from "../payload-scan";
 import type { PluginRuntime } from "./plugins";
 import type { Shell } from "./shell";
 import { createDevShell } from "./shell";
-import { sendNodeResponse, toWebRequest } from "./node";
+import {
+  BodyLimitError,
+  InvalidRequestError,
+  resolveRequestUrl,
+  sendNodeResponse,
+  toWebRequest,
+} from "./node";
+import { DEFAULT_BODY_LIMIT_BYTES } from "@moonsjs/core";
 import { emptyDevtoolsData, renderDevtoolsHtml, type DevtoolsData } from "../devtools";
 
 interface DevApp {
@@ -31,6 +38,9 @@ export function installDevMiddleware(
     templatePath: string;
     payloadScan?: PayloadScanOptions;
     apiPrefix?: string;
+    /** Addendum J.1: paritas dev dengan produksi (trustProxy/bodyLimitBytes). */
+    trustProxy?: boolean;
+    bodyLimitBytes?: number;
     /** Addendum I.4: datasource devtools overlay (dipanggil per request). */
     devtools?: () => DevtoolsData;
   },
@@ -77,7 +87,20 @@ export function installDevMiddleware(
       next();
       return;
     }
-    void handleRequest(getApp, req, res).catch((error: unknown) => {
+    void handleRequest(getApp, req, res, options).catch((error: unknown) => {
+      if (error instanceof InvalidRequestError) {
+        res.statusCode = 400;
+        res.setHeader("content-type", "text/plain; charset=utf-8");
+        res.end("Bad Request");
+        return;
+      }
+      if (error instanceof BodyLimitError) {
+        res.statusCode = 413;
+        res.setHeader("content-type", "text/plain; charset=utf-8");
+        res.end("Payload Too Large");
+        res.once("finish", () => req.destroy());
+        return;
+      }
       next(error as Error);
     });
   });
@@ -87,9 +110,16 @@ async function handleRequest(
   getApp: () => Promise<DevApp>,
   req: IncomingMessage,
   res: ServerResponse,
+  options: { trustProxy?: boolean; bodyLimitBytes?: number },
 ): Promise<void> {
   const app = await getApp();
-  const response = await app.handler(await toWebRequest(req));
+  const url = resolveRequestUrl(req, { trustProxy: options.trustProxy === true });
+  const isRpc = url.pathname.startsWith("/_moons/fn/");
+  const request = await toWebRequest(req, {
+    trustProxy: options.trustProxy === true,
+    ...(isRpc ? { maxBodyBytes: options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES } : {}),
+  });
+  const response = await app.handler(request);
   await sendNodeResponse(res, response);
 }
 

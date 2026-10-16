@@ -467,6 +467,9 @@ export function renderServerFnStub(
   const localNames = localTopLevelNames(ast);
   const importLines: string[] = [];
   const referenced: string[] = [];
+  // Addendum J.4 (D2): nama yang diimpor dari file `*.server.ts` lain — dipakai
+  // untuk mendeteksi referensi schema ke nilai server (dulu `MISSING_EXPORT`).
+  const serverImportedNames = new Map<string, { specifier: string; imported: string }>();
   let needsCreateStub = analysis.serverFns.length > 0;
 
   for (const statement of topLevelStatements(ast)) {
@@ -495,6 +498,9 @@ export function renderServerFnStub(
         const local = ((item["local"] as AstNode | undefined)?.["name"] as string) ?? "";
         if (local.length > 0 && isUsed(local, retainedText)) {
           kept.push(item);
+          const imported =
+            ((item["imported"] as AstNode | undefined)?.["name"] as string | undefined) ?? local;
+          serverImportedNames.set(local, { specifier, imported });
         }
       }
     } else {
@@ -532,7 +538,37 @@ export function renderServerFnStub(
       ["output", output],
     ] as const) {
       for (const reference of referencedIdentifiers(slice, filename)) {
-        if (reference.length === 0 || !localNames.has(reference)) {
+        if (reference.length === 0) {
+          continue;
+        }
+        const serverImport = serverImportedNames.get(reference);
+        if (serverImport !== undefined) {
+          const target = dependencies.analyzeSpecifier(filename, serverImport.specifier);
+          const isServerFn =
+            target !== null && target.serverFns.some((fn) => fn.name === serverImport.imported);
+          if (!isServerFn) {
+            throw new MoonsError({
+              code: "E_SCHEMA_SERVER_REF",
+              file: filename,
+              line: fn.line,
+              annotation: fn.name,
+              message: `schema ${kind} serverFn \`${fn.name}\` merujuk nilai server \`${reference}\` dari \`${serverImport.specifier}\``,
+              details:
+                `\`${reference}\` diimpor dari file server lain dan bukan serverFn — stub client tidak mengekspornya (dulu gagal dengan error mentah bundler \`MISSING_EXPORT\`).\n\n` +
+                "Pilih salah satu:\n" +
+                "  // a) pindahkan konstanta/schema ke modul client-safe\n" +
+                `  import { ${reference} } from "../shared/schemas";\n` +
+                "  // b) inline nilai yang memang publik di schema, atau\n" +
+                "  // c) validasi tambahan di handler (server) tanpa mereferensikan nilai server di schema",
+              suggestions: [
+                "Pindahkan deklarasi yang dirujuk ke modul bersama yang client-safe (mis. `src/shared/schemas.ts`)",
+                "Atau lakukan validasi di handler server, bukan di ekspresi schema",
+              ],
+            });
+          }
+          continue;
+        }
+        if (!localNames.has(reference)) {
           continue;
         }
         throw new MoonsError({
@@ -653,6 +689,10 @@ export interface ClientImportCheckContext {
   analyze: (absoluteFile: string) => ServerFileAnalysis | null;
   /** Direktori `src/api` (absolut) — modul API server-only (Addendum D.1). */
   apiDir?: string;
+  /** File config (absolut) — server-only (Addendum J.4). */
+  configFile?: string;
+  /** Direktori `src/server` (absolut) — server-only (Addendum J.4). */
+  serverDir?: string;
   /** Paket server-only tambahan dari `security.serverOnlyPackages` (Addendum C). */
   serverOnlyPackages?: ReadonlyArray<string>;
   /** Cache package.json lintas modul (performa; dikelola plugin). */
@@ -738,6 +778,54 @@ export async function checkClientModuleImports(
       apiDirReal = context.apiDir;
     }
   }
+
+  // Addendum J.4: config + direktori `src/server/**` server-only.
+  let configFileReal: string | null = null;
+  if (context.configFile !== undefined) {
+    try {
+      configFileReal = realpathSync(context.configFile);
+    } catch {
+      configFileReal = context.configFile;
+    }
+  }
+  let serverDirReal: string | null = null;
+  if (context.serverDir !== undefined) {
+    try {
+      serverDirReal = realpathSync(context.serverDir);
+    } catch {
+      serverDirReal = context.serverDir;
+    }
+  }
+
+  const rejectConfigImport = (line: number, specifier: string): never => {
+    throw new MoonsError({
+      code: "E_FORBIDDEN_SERVER_IMPORT",
+      file: relativeFile,
+      line,
+      message: `mengimpor \`${specifier}\` — \`moons.config.ts\` adalah modul server-only`,
+      details:
+        "Config memuat `context`/`middleware` (kode server) dan tidak pernah masuk bundle client (Addendum J.4).",
+      suggestions: [
+        "Pindahkan nilai yang dibutuhkan ke modul client-safe (mis. `src/shared/…`)",
+        "Ambil nilai dari server lewat loader/serverFn",
+      ],
+    });
+  };
+
+  const rejectServerDirImport = (line: number, specifier: string, resolvedTarget: string): never => {
+    throw new MoonsError({
+      code: "E_FORBIDDEN_SERVER_IMPORT",
+      file: relativeFile,
+      line,
+      message: `mengimpor \`${specifier}\` — \`${toRelative(projectRoot, resolvedTarget)}\` ada di \`src/server/**\` (server-only)`,
+      details:
+        "Direktori `src/server/**` hanya untuk kode server (Addendum J.4); suffix `.server.ts` bukan satu-satunya jaminan.",
+      suggestions: [
+        "Pindahkan kode yang client-safe ke `src/shared/`",
+        "Akses nilainya dari server lewat loader/serverFn",
+      ],
+    });
+  };
 
   const rejectApiImport = (line: number, specifier: string, resolvedTarget: string): never => {
     const relApi = toRelative(projectRoot, resolvedTarget);
@@ -852,6 +940,24 @@ export async function checkClientModuleImports(
         rejectApiImport(line, rawSpecifier, resolvedTarget);
       }
 
+      // Addendum J.4: `moons.config.ts` + direktori `src/server/**` server-only
+      // (impor nilai; type-only dikecualikan — J.5).
+      if (!typeOnly && resolvedTarget !== null) {
+        if (configFileReal !== null && resolvedTarget === configFileReal) {
+          rejectConfigImport(line, rawSpecifier);
+        }
+        if (
+          serverDirReal !== null &&
+          isInsideDir(resolvedTarget, serverDirReal) &&
+          !isServerFilePath(resolvedTarget) &&
+          // File non-kontrak (`*.server.mts` dll.) punya error khusus yang
+          // lebih tepat — biarkan jatuh ke pemeriksaan di bawah.
+          !isNonContractServerFile(resolvedTarget)
+        ) {
+          rejectServerDirImport(line, rawSpecifier, resolvedTarget);
+        }
+      }
+
       // Addendum C: paket server-only (nama paket hasil resolve — subpath,
       // alias, tsconfig paths, symlink/workspace ikut tertangkap).
       if (!typeOnly) {
@@ -906,9 +1012,13 @@ export async function checkClientModuleImports(
           reject(line, `mengimpor namespace (\`* as\`) dari ${targetRelative}`, "Import namespace dari file server tidak boleh menyeberang ke client.");
         }
         const name = ((item["local"] as AstNode | undefined)?.["name"] as string) ?? "";
-        const kind = (item["importKind"] as string | undefined) ?? (statement["importKind"] as string | undefined);
-        if (kind === "type") {
-          reject(line, `mengimpor type \`${name}\` dari ${targetRelative}`, "Import dari file server tidak diizinkan di modul client.");
+        // Type-only (Addendum J.5): Babel menaruh `importKind: "type"` di
+        // statement untuk `import type { X }`, dan di specifier untuk
+        // `import { type X }` — keduanya harus dibaca (D1).
+        const specifierKind = item["importKind"] as string | undefined;
+        const statementKind = statement["importKind"] as string | undefined;
+        if (specifierKind === "type" || statementKind === "type") {
+          continue;
         }
         if (name.length > 0 && !(await isAllowedServerFnImport(resolvedTarget, specifier, name))) {
           reject(
