@@ -17,6 +17,7 @@ import {
   type ResolvedRoute,
   type RouteDefinition,
   type RouteModule,
+  trailingSlashRedirect,
 } from "@moonsjs/core";
 import { encodeSsrPayload, reviveError, serializeError } from "@moonsjs/core/serialize";
 import { API_METHODS, resolveApiRoute } from "@moonsjs/core";
@@ -456,6 +457,19 @@ export function createRequestHandler(
     };
 
     try {
+      // Addendum M: kanonikalisasi trailing slash sebelum routing (308,
+      // query dipertahankan; `/_moons/**`, root, dan aset dikecualikan).
+      if (!isPrerender && config.trailingSlash !== undefined) {
+        const policyUrl = new URL(request.url);
+        const canonical = trailingSlashRedirect(policyUrl.pathname, config.trailingSlash);
+        if (canonical !== null) {
+          policyUrl.pathname = canonical;
+          return applyHeaders(
+            new Response(null, { status: 308, headers: { location: policyUrl.toString() } }),
+          );
+        }
+      }
+
       if (!isPrerender && redirects.length > 0) {
         const url = new URL(request.url);
         const path = url.pathname.replace(/\/$/, "");

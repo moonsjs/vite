@@ -2,7 +2,12 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { createServer, type Server } from "node:http";
 import { extname, join, resolve, sep } from "node:path";
-import { DEFAULT_BODY_LIMIT_BYTES, MoonsError, type PrerenderStorage } from "@moonsjs/core";
+import {
+  DEFAULT_BODY_LIMIT_BYTES,
+  MoonsError,
+  trailingSlashRedirect,
+  type PrerenderStorage,
+} from "@moonsjs/core";
 import { revalidatePrerendered, shouldRevalidate } from "./isr";
 import { contentTypeForPathname } from "./storage";
 import {
@@ -68,6 +73,8 @@ export interface NodeServerOptions {
   bodyLimitBytes?: number;
   /** Addendum L.3: log akses terstruktur (default senyap). */
   logging?: { accessLog?: boolean; json?: boolean; redact?: string[] };
+  /** Addendum M: kebijakan trailing slash (juga untuk path prerender/static). */
+  trailingSlash?: "never" | "always";
 }
 
 /**
@@ -120,6 +127,19 @@ export function startNodeServer(
       }
 
       try {
+        // Addendum M: kanonikalisasi trailing slash di transport — mencakup
+        // path prerender yang dilayani langsung (tidak lewat handler).
+        if (options.trailingSlash !== undefined) {
+          const canonical = trailingSlashRedirect(url.pathname, options.trailingSlash);
+          if (canonical !== null) {
+            url.pathname = canonical;
+            res.statusCode = 308;
+            res.setHeader("location", url.toString());
+            res.end();
+            return;
+          }
+        }
+
         if (req.method === "GET" || req.method === "HEAD") {
           // Addendum I: storage bersama (bila dikonfigurasi) diutamakan.
           if (options.storage !== undefined) {

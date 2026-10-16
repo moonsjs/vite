@@ -44,6 +44,59 @@ function httpGet(
   });
 }
 
+function makePrerenderedDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "moons-static-m-"));
+  mkdirSync(join(dir, "about"), { recursive: true });
+  writeFileSync(join(dir, "about", "index.html"), "ABOUT-PAGE");
+  writeFileSync(
+    join(dir, "_moons_prerender.json"),
+    JSON.stringify({ version: 2, entries: [{ path: "/about" }] }),
+  );
+  return dir;
+}
+
+test("M: node-server — trailingSlash mencakup path prerender (never & always)", async () => {
+  const handler = async (): Promise<Response> => new Response("handler", { status: 404 });
+
+  const neverServer = startNodeServer(handler, {
+    port: 0,
+    clientDir: makePrerenderedDir(),
+    handleSignals: false,
+    trailingSlash: "never",
+  });
+  const neverPort = await listen(neverServer);
+  try {
+    const redirect = await httpGet(neverPort, "/about/");
+    expect(redirect.status).toBe(308);
+    expect(String(redirect.headers["location"])).toBe(`http://127.0.0.1:${neverPort}/about`);
+
+    const ok = await httpGet(neverPort, "/about");
+    expect(ok.status).toBe(200);
+    expect(ok.body.toString()).toBe("ABOUT-PAGE");
+  } finally {
+    await new Promise<void>((resolve) => neverServer.close(() => resolve()));
+  }
+
+  const alwaysServer = startNodeServer(handler, {
+    port: 0,
+    clientDir: makePrerenderedDir(),
+    handleSignals: false,
+    trailingSlash: "always",
+  });
+  const alwaysPort = await listen(alwaysServer);
+  try {
+    const redirect = await httpGet(alwaysPort, "/about");
+    expect(redirect.status).toBe(308);
+    expect(String(redirect.headers["location"])).toBe(`http://127.0.0.1:${alwaysPort}/about/`);
+
+    const ok = await httpGet(alwaysPort, "/about/");
+    expect(ok.status).toBe(200);
+    expect(ok.body.toString()).toBe("ABOUT-PAGE");
+  } finally {
+    await new Promise<void>((resolve) => alwaysServer.close(() => resolve()));
+  }
+});
+
 test("K.5: ETag + gzip cache + 304 pada file statis", async () => {
   const server = startNodeServer(async () => new Response("handler", { status: 404 }), {
     port: 0,
