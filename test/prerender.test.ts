@@ -217,3 +217,77 @@ test("prerender: guard kebocoran fail-mode — canary & env rahasia → E_PREREN
   expect((envError as MoonsError).code).toBe("E_PRERENDER_LEAK");
   expect((envError as MoonsError).format()).toContain("env(DB_SECRET)");
 });
+
+test("Addendum G: 404.html ditulis bila `_404` ada; dilewati bila tidak ada/non-404; leak tetap fail-mode", async () => {
+  const notFoundRoute: RouteDefinition = {
+    path: "/",
+    file: `${ROUTES_DIR}/_404.tsx`,
+    kind: "404",
+    params: [],
+  };
+
+  // 1) `_404` ada + sentinel 404 → `404.html` ditulis.
+  const clientDir = makeClientDir();
+  await runPrerender(
+    makeOptions({
+      routes: [page(`${ROUTES_DIR}/index.tsx`, "/"), notFoundRoute],
+      modules: { index: { prerender: true } },
+      handler: async (request) => {
+        const pathname = new URL(request.url).pathname;
+        if (pathname === "/_moons/404") {
+          return new Response("<html><body>HALAMAN-404-M9</body></html>", { status: 404 });
+        }
+        return new Response("<html><body>ok</body></html>");
+      },
+      clientDir,
+    }),
+  );
+  expect(readFileSync(join(clientDir, "404.html"), "utf8")).toContain("HALAMAN-404-M9");
+
+  // 2) Tanpa route `_404` → tidak ada file (static host memakai 404 bawaannya).
+  const without404 = makeClientDir();
+  await runPrerender(
+    makeOptions({
+      routes: [page(`${ROUTES_DIR}/index.tsx`, "/")],
+      modules: { index: { prerender: true } },
+      handler: async () => new Response("<html>ok</html>"),
+      clientDir: without404,
+    }),
+  );
+  expect(existsSync(join(without404, "404.html"))).toBe(false);
+
+  // 3) `_404` ada tetapi sentinel bukan 404 (mis. catch-all selalu 200) → dilewati.
+  const non404 = makeClientDir();
+  await runPrerender(
+    makeOptions({
+      routes: [page(`${ROUTES_DIR}/index.tsx`, "/"), notFoundRoute],
+      modules: { index: { prerender: true } },
+      handler: async () => new Response("<html>semua-200</html>"),
+      clientDir: non404,
+    }),
+  );
+  expect(existsSync(join(non404, "404.html"))).toBe(false);
+
+  // 4) Canary di body 404 → E_PRERENDER_LEAK (fail-mode, file 404.html).
+  const leaky = makeClientDir();
+  let thrown: unknown;
+  try {
+    await runPrerender(
+      makeOptions({
+        routes: [page(`${ROUTES_DIR}/index.tsx`, "/"), notFoundRoute],
+        modules: { index: { prerender: true } },
+        handler: async (request) =>
+          new URL(request.url).pathname === "/_moons/404"
+            ? new Response("<html>MOONS_CANARY_404</html>", { status: 404 })
+            : new Response("<html>ok</html>"),
+        clientDir: leaky,
+        canary: "MOONS_CANARY_404",
+      }),
+    );
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(MoonsError);
+  expect((thrown as MoonsError).code).toBe("E_PRERENDER_LEAK");
+  expect((thrown as MoonsError).file).toContain("404.html");
+});

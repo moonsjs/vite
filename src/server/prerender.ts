@@ -31,6 +31,16 @@ export interface PrerenderResult {
  */
 export const PRERENDER_MANIFEST_FILE = "_moons_prerender.json";
 
+/**
+ * Addendum G: sentinel internal untuk merender halaman 404 statis. Path ini
+ * tidak pernah menjadi route publik; handler merendernya seperti request tak
+ * dikenal (route `_404` atau 404 bawaan).
+ */
+export const NOT_FOUND_SENTINEL = "/_moons/404";
+
+/** Addendum G: nama file 404 untuk static host (konvensi Cloudflare Pages/Netlify). */
+export const NOT_FOUND_FILE = "404.html";
+
 export async function runPrerender(options: PrerenderOptions): Promise<PrerenderResult> {
   const log = options.log ?? ((message: string) => console.log(message));
   const env = options.env ?? process.env;
@@ -99,26 +109,7 @@ export async function runPrerender(options: PrerenderOptions): Promise<Prerender
       }
 
       const html = await response.text();
-      const findings = scanPayloadForSecrets(html, {
-        ...(options.canary === undefined ? {} : { canary: options.canary }),
-        env,
-      });
-      if (findings.length > 0) {
-        const labels = findings
-          .map((finding) => (finding.kind === "canary" ? "canary" : `env(${finding.label})`))
-          .join(", ");
-        throw new MoonsError({
-          code: "E_PRERENDER_LEAK",
-          file: route.file,
-          message: `hasil prerender \`${pathname}\` memuat ${labels}`,
-          details:
-            "HTML statis permanen — rahasia yang ter-prerender tidak bisa ditarik kembali.",
-          suggestions: [
-            "Jangan mengembalikan nilai env rahasia dari loader yang di-prerender",
-            "Matikan `prerender` untuk route ini atau pindahkan datanya ke serverFn request-time",
-          ],
-        });
-      }
+      assertNoLeak(html, pathname, route.file, options, env);
 
       const file = outputFile(options.clientDir, pathname);
       mkdirSync(dirname(file), { recursive: true });
@@ -132,14 +123,84 @@ export async function runPrerender(options: PrerenderOptions): Promise<Prerender
     }
   }
 
+  // Addendum G: `404.html` untuk static host, bila app punya route `_404`.
+  const notFound = await renderStaticNotFound(options, env, log);
+  let wrote404 = false;
+  if (notFound !== null) {
+    writeFileSync(join(options.clientDir, NOT_FOUND_FILE), notFound);
+    wrote404 = true;
+  }
+
   // Manifest v2 (Addendum E.1): entries + revalidate; reader tetap menerima v1.
   writeFileSync(
     join(options.clientDir, PRERENDER_MANIFEST_FILE),
     `${JSON.stringify({ version: 2, entries }, null, 2)}\n`,
   );
 
-  log(`[moons] prerender selesai: ${written} file (${skipped} dilewati)`);
+  log(
+    `[moons] prerender selesai: ${written} file${wrote404 ? ` + ${NOT_FOUND_FILE}` : ""} (${skipped} dilewati)`,
+  );
   return { written, skipped };
+}
+
+/**
+ * Addendum G: render halaman 404 ke `dist/client/404.html` (static export).
+ * Ditulis hanya bila app memiliki route `_404` dan sentinel menghasilkan 404;
+ * hasilnya tetap melewati guard kebocoran (fail-mode).
+ */
+async function renderStaticNotFound(
+  options: PrerenderOptions,
+  env: Record<string, string | undefined>,
+  log: (message: string) => void,
+): Promise<string | null> {
+  if (!options.routes.some((route) => route.kind === "404")) {
+    return null;
+  }
+  const response = await options.handler(
+    new Request(`http://localhost${NOT_FOUND_SENTINEL}`, {
+      method: "GET",
+      headers: { "x-moons-prerender": "1" },
+    }),
+  );
+  if (response.status !== 404) {
+    log(
+      `[moons] prerender: ${NOT_FOUND_FILE} dilewati (sentinel \`${NOT_FOUND_SENTINEL}\` → ${response.status})`,
+    );
+    return null;
+  }
+  const html = await response.text();
+  assertNoLeak(html, NOT_FOUND_SENTINEL, NOT_FOUND_FILE, options, env);
+  return html;
+}
+
+/** Guard kebocoran fail-mode (Addendum D.5) — dipakai halaman & 404 statis. */
+function assertNoLeak(
+  html: string,
+  pathname: string,
+  file: string,
+  options: PrerenderOptions,
+  env: Record<string, string | undefined>,
+): void {
+  const findings = scanPayloadForSecrets(html, {
+    ...(options.canary === undefined ? {} : { canary: options.canary }),
+    env,
+  });
+  if (findings.length === 0) {
+    return;
+  }
+  const labels = findings
+    .map((finding) => (finding.kind === "canary" ? "canary" : `env(${finding.label})`))
+    .join(", ");
+  throw new MoonsError({
+    code: "E_PRERENDER_LEAK",
+    file,
+    message: `hasil prerender \`${pathname}\` memuat ${labels}`,
+    details: "HTML statis permanen — rahasia yang ter-prerender tidak bisa ditarik kembali.",
+    suggestions: [
+      "Jangan mengembalikan nilai env rahasia dari loader yang di-prerender",
+      "Matikan `prerender` untuk route ini atau pindahkan datanya ke serverFn request-time",
+    ],
+  });
 }
 
 function routeKeyOf(routesDir: string, file: string): string {
