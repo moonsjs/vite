@@ -576,6 +576,7 @@ function renderPrerenderEntry(
     `  routesDir: ${JSON.stringify(routesDir)},`,
     "  loadRoute,",
     "  handler,",
+    "  staticConfig: config,",
     `  clientDir: ${JSON.stringify(resolvePath(projectRoot, "dist/client"))},`,
     ...(canary === undefined ? [] : [`  canary: ${JSON.stringify(canary)},`]),
     "});",

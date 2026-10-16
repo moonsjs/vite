@@ -343,7 +343,7 @@ export function createRequestHandler(
     return result;
   }
 
-  return async function handler(request: Request): Promise<Response> {
+  const handleCore = async function handler(request: Request): Promise<Response> {
     try {
       const url = new URL(request.url);
 
@@ -433,6 +433,57 @@ export function createRequestHandler(
         return applyResponseMutations(response);
       });
     } catch (error) {
+      return internalErrorResponse(error);
+    }
+  };
+
+  // Addendum H: redirect statis + hook lifecycle + header statis.
+  const staticHeaders = Object.entries(config.headers ?? {});
+  const redirects = (config.redirects ?? []).map((entry) => ({
+    ...entry,
+    status: entry.status ?? 301,
+  }));
+
+  return async function handler(request: Request): Promise<Response> {
+    const isPrerender = request.headers.get("x-moons-prerender") === "1";
+    const applyHeaders = (response: Response): Response => {
+      for (const [name, value] of staticHeaders) {
+        if (!response.headers.has(name)) {
+          response.headers.set(name, value);
+        }
+      }
+      return response;
+    };
+
+    try {
+      if (!isPrerender && redirects.length > 0) {
+        const url = new URL(request.url);
+        const path = url.pathname.replace(/\/$/, "");
+        for (const entry of redirects) {
+          if (path === entry.from.replace(/\/$/, "")) {
+            const location = entry.to.startsWith("http")
+              ? entry.to
+              : new URL(entry.to, url.origin).toString();
+            return applyHeaders(
+              new Response(null, { status: entry.status, headers: { location } }),
+            );
+          }
+        }
+      }
+
+      await config.hooks?.onRequest?.(request);
+      let response = await handleCore(request);
+      const replaced = await config.hooks?.onResponse?.(response, request);
+      if (replaced instanceof Response) {
+        response = replaced;
+      }
+      return applyHeaders(response);
+    } catch (error) {
+      try {
+        await config.hooks?.onError?.(error, request);
+      } catch {
+        // Kegagalan hook tidak boleh menutupi error asli.
+      }
       return internalErrorResponse(error);
     }
   };

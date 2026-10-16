@@ -22,6 +22,12 @@ function makeOptions(input: {
   clientDir: string;
   canary?: string;
   env?: Record<string, string | undefined>;
+  staticConfig?: {
+    headers?: Record<string, string>;
+    redirects?: Array<{ from: string; to: string; status?: number }>;
+    sitemap?: { site: string; exclude?: string[] };
+    robots?: { sitemap?: boolean; disallow?: string[] };
+  };
 }) {
   const loadRoute: Record<string, () => Promise<RouteModule>> = {};
   for (const [key, module] of Object.entries(input.modules)) {
@@ -34,6 +40,7 @@ function makeOptions(input: {
     handler: input.handler,
     clientDir: input.clientDir,
     ...(input.canary === undefined ? {} : { canary: input.canary }),
+    ...(input.staticConfig === undefined ? {} : { staticConfig: input.staticConfig }),
     env: input.env ?? {},
     log: () => {},
   };
@@ -290,4 +297,54 @@ test("Addendum G: 404.html ditulis bila `_404` ada; dilewati bila tidak ada/non-
   expect(thrown).toBeInstanceOf(MoonsError);
   expect((thrown as MoonsError).code).toBe("E_PRERENDER_LEAK");
   expect((thrown as MoonsError).file).toContain("404.html");
+});
+
+test("Addendum H: staticConfig menulis _headers/_redirects/sitemap.xml/robots.txt", async () => {
+  const clientDir = makeClientDir();
+  await runPrerender(
+    makeOptions({
+      routes: [
+        page(`${ROUTES_DIR}/index.tsx`, "/"),
+        page(`${ROUTES_DIR}/about.tsx`, "/about"),
+      ],
+      modules: { index: { prerender: true }, about: { prerender: true } },
+      handler: async () => new Response("<html>ok</html>"),
+      clientDir,
+      staticConfig: {
+        headers: { "x-frame-options": "DENY" },
+        redirects: [
+          { from: "/lama", to: "/about" },
+          { from: "/pindah", to: "https://example.com", status: 302 },
+        ],
+        sitemap: { site: "https://example.com", exclude: ["/skip"] },
+        robots: { disallow: ["/internal"] },
+      },
+    }),
+  );
+
+  expect(readFileSync(join(clientDir, "_headers"), "utf8")).toBe("/*\n  x-frame-options: DENY\n");
+  expect(readFileSync(join(clientDir, "_redirects"), "utf8")).toBe(
+    "/lama /about 301\n/pindah https://example.com 302\n",
+  );
+  const sitemap = readFileSync(join(clientDir, "sitemap.xml"), "utf8");
+  expect(sitemap).toContain("<loc>https://example.com/</loc>");
+  expect(sitemap).toContain("<loc>https://example.com/about</loc>");
+  const robots = readFileSync(join(clientDir, "robots.txt"), "utf8");
+  expect(robots).toContain("Disallow: /internal");
+  expect(robots).toContain("Sitemap: https://example.com/sitemap.xml");
+
+  // Tanpa staticConfig → tidak ada file deploy kit (opt-in).
+  const bare = makeClientDir();
+  await runPrerender(
+    makeOptions({
+      routes: [page(`${ROUTES_DIR}/index.tsx`, "/")],
+      modules: { index: { prerender: true } },
+      handler: async () => new Response("ok"),
+      clientDir: bare,
+    }),
+  );
+  expect(existsSync(join(bare, "_headers"))).toBe(false);
+  expect(existsSync(join(bare, "_redirects"))).toBe(false);
+  expect(existsSync(join(bare, "sitemap.xml"))).toBe(false);
+  expect(existsSync(join(bare, "robots.txt"))).toBe(false);
 });

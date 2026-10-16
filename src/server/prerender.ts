@@ -7,6 +7,14 @@ import { scanPayloadForSecrets } from "../payload-scan";
  * Prerender statis (PRD Addendum D.5): render route ber-`prerender = true`
  * saat build → `dist/client/<path>/index.html` (guard: payload scan fail-mode).
  */
+/** Addendum H: config statis yang ditulis saat prerender (deploy kit). */
+export interface PrerenderStaticConfig {
+  headers?: Record<string, string>;
+  redirects?: Array<{ from: string; to: string; status?: number }>;
+  sitemap?: { site: string; exclude?: string[] };
+  robots?: { sitemap?: boolean; disallow?: string[] };
+}
+
 export interface PrerenderOptions {
   routes: RouteDefinition[];
   routesDir: string;
@@ -18,6 +26,8 @@ export interface PrerenderOptions {
   canary?: string;
   env?: Record<string, string | undefined>;
   log?: (message: string) => void;
+  /** Addendum H: `headers`/`redirects`/`sitemap`/`robots` dari config. */
+  staticConfig?: PrerenderStaticConfig;
 }
 
 export interface PrerenderResult {
@@ -137,10 +147,73 @@ export async function runPrerender(options: PrerenderOptions): Promise<Prerender
     `${JSON.stringify({ version: 2, entries }, null, 2)}\n`,
   );
 
+  // Addendum H: deploy kit statis (headers/redirects/sitemap/robots).
+  const emitted = emitStaticFiles(options.clientDir, options.staticConfig, entries);
+
+  const extras = [...(wrote404 ? [NOT_FOUND_FILE] : []), ...emitted];
   log(
-    `[moons] prerender selesai: ${written} file${wrote404 ? ` + ${NOT_FOUND_FILE}` : ""} (${skipped} dilewati)`,
+    `[moons] prerender selesai: ${written} file${extras.length > 0 ? ` + ${extras.join(" + ")}` : ""} (${skipped} dilewati)`,
   );
   return { written, skipped };
+}
+
+/** Tulis file deploy statis dari config; mengembalikan nama file yang ditulis. */
+function emitStaticFiles(
+  clientDir: string,
+  staticConfig: PrerenderStaticConfig | undefined,
+  entries: Array<{ path: string }>,
+): string[] {
+  if (staticConfig === undefined) {
+    return [];
+  }
+  const emitted: string[] = [];
+
+  const headers = Object.entries(staticConfig.headers ?? {});
+  if (headers.length > 0) {
+    const lines = ["/*", ...headers.map(([name, value]) => `  ${name}: ${value}`)];
+    writeFileSync(join(clientDir, "_headers"), `${lines.join("\n")}\n`);
+    emitted.push("_headers");
+  }
+
+  const redirects = staticConfig.redirects ?? [];
+  if (redirects.length > 0) {
+    const lines = redirects.map((entry) => `${entry.from} ${entry.to} ${entry.status ?? 301}`);
+    writeFileSync(join(clientDir, "_redirects"), `${lines.join("\n")}\n`);
+    emitted.push("_redirects");
+  }
+
+  const sitemap = staticConfig.sitemap;
+  if (sitemap !== undefined) {
+    const site = sitemap.site.replace(/\/$/, "");
+    const exclude = sitemap.exclude ?? [];
+    const paths = [...new Set(entries.map((entry) => entry.path))]
+      .filter((path) => !exclude.some((prefix) => path.startsWith(prefix)))
+      .sort();
+    const xml = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+      ...paths.map((path) => `  <url><loc>${site}${path === "/" ? "/" : path}</loc></url>`),
+      "</urlset>",
+      "",
+    ].join("\n");
+    writeFileSync(join(clientDir, "sitemap.xml"), xml);
+    emitted.push("sitemap.xml");
+  }
+
+  const robots = staticConfig.robots;
+  if (robots !== undefined) {
+    const lines = ["User-agent: *"];
+    for (const path of robots.disallow ?? []) {
+      lines.push(`Disallow: ${path}`);
+    }
+    if ((robots.sitemap ?? true) && sitemap !== undefined) {
+      lines.push("", `Sitemap: ${sitemap.site.replace(/\/$/, "")}/sitemap.xml`);
+    }
+    writeFileSync(join(clientDir, "robots.txt"), `${lines.join("\n")}\n`);
+    emitted.push("robots.txt");
+  }
+
+  return emitted;
 }
 
 /**
