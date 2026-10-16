@@ -39,6 +39,11 @@ export interface NodeServerOptions {
   plugins?: PluginRuntime;
   /** Canary `leakTest.canary` untuk guard ISR (Addendum E.1). */
   canary?: string;
+  /**
+   * Header statis dari config (Addendum H). Diterapkan juga pada file
+   * prerender yang disajikan langsung (static host memakai `_headers`).
+   */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -64,6 +69,11 @@ export function startNodeServer(
             const body = readFileSync(staticFile);
             res.statusCode = 200;
             res.setHeader("content-type", MIME_TYPES[extname(staticFile).toLowerCase()] ?? "application/octet-stream");
+            for (const [name, value] of Object.entries(options.headers ?? {})) {
+              if (!res.hasHeader(name)) {
+                res.setHeader(name, value);
+              }
+            }
             res.end(req.method === "HEAD" ? undefined : body);
             return;
           }
