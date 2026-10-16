@@ -196,3 +196,47 @@ test("J.4/D2: schema merujuk serverFn dari file lain tetap boleh", () => {
   });
   expect(result.code.length).toBeGreaterThan(0);
 });
+
+test("K.1: nilai server lewat rantai re-export barrel → pesan Moons (bukan MISSING_EXPORT)", async () => {
+  const root = makeTempDir();
+  const sourceSecrets = [
+    'import { serverFn } from "@moonsjs/server";',
+    'import { z } from "zod";',
+    'export const SECRET = "x";',
+    "export const ping = serverFn({",
+    "  input: z.object({}),",
+    "  output: z.object({ ok: z.boolean() }),",
+    "  handler: async () => ({ ok: true }),",
+    "});",
+    "",
+  ].join("\n");
+  const secrets = writeFile(root, "src/server/secrets.server.ts", sourceSecrets);
+  const barrelInner = writeFile(root, "src/lib/inner.ts", 'export * from "../server/secrets.server";');
+  const barrel = writeFile(root, "src/lib/barrel.ts", 'export * from "./inner";');
+  const analysis = analyzeServerFile(sourceSecrets, secrets, root);
+
+  const resolve = (specifier: string): string | null => {
+    if (specifier === "../lib/barrel") return barrel;
+    if (specifier === "./inner") return barrelInner;
+    if (specifier === "../server/secrets.server") return secrets;
+    return null;
+  };
+
+  const value = await check({
+    root,
+    source: 'import { SECRET } from "../lib/barrel";\nexport default SECRET;',
+    resolve,
+    analyze: () => analysis,
+  });
+  const moons = expectCode(value, "E_SERVER_IMPORT_IN_CLIENT");
+  expect(moons.message).toContain("rantai re-export");
+  expect(moons.message).toContain("secrets.server.ts");
+
+  const fn = await check({
+    root,
+    source: 'import { ping } from "../lib/barrel";\nexport default String(ping);',
+    resolve,
+    analyze: () => analysis,
+  });
+  expect(fn).toBeNull();
+});

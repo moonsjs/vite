@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import { createServer, type Server } from "node:http";
 import { extname, join, resolve, sep } from "node:path";
 import { DEFAULT_BODY_LIMIT_BYTES, MoonsError, type PrerenderStorage } from "@moonsjs/core";
@@ -124,10 +125,37 @@ export function startNodeServer(
                 clientDir,
               });
               const body = readFileSync(staticFile);
+              const stat = statSync(staticFile);
               res.statusCode = 200;
               res.setHeader("content-type", MIME_TYPES[extname(staticFile).toLowerCase()] ?? "application/octet-stream");
               applyStaticHeaders(res, url.pathname, options.headers);
-              res.end(req.method === "HEAD" ? undefined : body);
+
+              // Addendum K.5: ETag + 304.
+              const etag = `W/"${stat.size}-${Math.floor(stat.mtimeMs)}"`;
+              res.setHeader("etag", etag);
+              const ifNoneMatch = req.headers["if-none-match"];
+              if (
+                typeof ifNoneMatch === "string" &&
+                ifNoneMatch.split(",").some((value) => value.trim() === etag)
+              ) {
+                res.statusCode = 304;
+                res.end();
+                return;
+              }
+
+              // Addendum K.5: gzip untuk aset teks (cache per mtime).
+              let payload: Buffer = body;
+              if (
+                req.method === "GET" &&
+                COMPRESSIBLE_FILE.test(staticFile) &&
+                body.byteLength >= GZIP_MIN_BYTES &&
+                acceptsGzip(req)
+              ) {
+                payload = gzipCached(staticFile, stat.mtimeMs, body);
+                res.setHeader("content-encoding", "gzip");
+                appendVary(res, "accept-encoding");
+              }
+              res.end(req.method === "HEAD" ? undefined : payload);
               return;
             }
           }
@@ -224,6 +252,51 @@ function applyStaticHeaders(
   if (pathname.startsWith("/assets/") && !res.hasHeader("cache-control")) {
     res.setHeader("cache-control", "public, max-age=31536000, immutable");
   }
+}
+
+const COMPRESSIBLE_FILE = /\.(js|mjs|css|html|json|svg|txt|map|xml)$/i;
+const GZIP_MIN_BYTES = 1024;
+const GZIP_CACHE_MAX = 64;
+const gzipCache = new Map<string, { mtimeMs: number; gzip: Buffer }>();
+
+function acceptsGzip(req: import("node:http").IncomingMessage): boolean {
+  const header = req.headers["accept-encoding"];
+  if (typeof header !== "string") {
+    return false;
+  }
+  return header
+    .toLowerCase()
+    .split(",")
+    .map((part) => part.trim())
+    .some((part) => part === "gzip" || part === "*" || part.startsWith("gzip;"));
+}
+
+/** Varian gzip ter-cache per file+mtime (bounded FIFO) — Addendum K.5. */
+function gzipCached(file: string, mtimeMs: number, body: Buffer): Buffer {
+  const cached = gzipCache.get(file);
+  if (cached !== undefined && cached.mtimeMs === mtimeMs) {
+    return cached.gzip;
+  }
+  const gzip = gzipSync(body);
+  if (gzipCache.size >= GZIP_CACHE_MAX) {
+    const oldest = gzipCache.keys().next().value;
+    if (oldest !== undefined) {
+      gzipCache.delete(oldest);
+    }
+  }
+  gzipCache.set(file, { mtimeMs, gzip });
+  return gzip;
+}
+
+function appendVary(res: import("node:http").ServerResponse, value: string): void {
+  const existing = res.getHeader("vary");
+  if (typeof existing === "string" && existing.length > 0) {
+    if (!existing.toLowerCase().includes(value)) {
+      res.setHeader("vary", `${existing}, ${value}`);
+    }
+    return;
+  }
+  res.setHeader("vary", value);
 }
 
 function respondBadRequest(res: import("node:http").ServerResponse): void {

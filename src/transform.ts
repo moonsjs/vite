@@ -758,11 +758,151 @@ export function nonContractServerFileError(file: string, projectRoot: string): M
 }
 
 /** Periksa import modul client terhadap §12.4/§12.7/§12.8 — berbasis hasil resolve. */
+interface TraceFileRecord {
+  ast: AstNode | null;
+  mentionsServer: boolean;
+}
+
+/**
+ * Addendum K.1: telusuri apakah `name` dari sebuah modul client pada akhirnya
+ * berasal dari `*.server.ts` (langsung atau lewat rantai re-export/barrel),
+ * dan bukan serverFn. Mengembalikan file server yang bermasalah, atau null.
+ */
+async function traceValueToServer(input: {
+  file: string;
+  name: string;
+  resolveSafe: (specifier: string, importer: string) => Promise<string | null>;
+  analyze: (absoluteFile: string) => ServerFileAnalysis | null;
+  cache: Map<string, TraceFileRecord>;
+  seen: Set<string>;
+}): Promise<string | null> {
+  const key = `${input.file}#${input.name}`;
+  if (input.seen.has(key) || input.seen.size > 64) {
+    return null;
+  }
+  input.seen.add(key);
+
+  const record = loadTraceFile(input.file, input.cache);
+  if (record === null || record.ast === null || !record.mentionsServer) {
+    return null;
+  }
+  const ast = record.ast;
+  if (localTopLevelNames(ast).has(input.name)) {
+    return null; // didefinisikan lokal = kode client
+  }
+
+  const importBindings = new Map<string, { specifier: string; imported: string }>();
+  const edges: Array<{ specifier: string; local: string }> = [];
+
+  for (const statement of topLevelStatements(ast)) {
+    if (statement.type === "ImportDeclaration") {
+      const source = (statement["source"] as AstNode | null | undefined)?.["value"];
+      if (typeof source !== "string") {
+        continue;
+      }
+      for (const item of (statement["specifiers"] ?? []) as AstNode[]) {
+        if (item.type !== "ImportSpecifier") {
+          continue;
+        }
+        const local = (item["local"] as AstNode | undefined)?.["name"] as string | undefined;
+        const imported = ((item["imported"] as AstNode | undefined)?.["name"] as string | undefined) ?? local;
+        if (local !== undefined && imported !== undefined) {
+          importBindings.set(local, { specifier: source, imported });
+        }
+      }
+      continue;
+    }
+
+    if (statement.type === "ExportNamedDeclaration") {
+      const source = (statement["source"] as AstNode | null | undefined)?.["value"];
+      for (const item of (statement["specifiers"] ?? []) as AstNode[]) {
+        if (item.type !== "ExportSpecifier") {
+          continue;
+        }
+        const local = (item["local"] as AstNode | undefined)?.["name"] as string | undefined;
+        const exported = ((item["exported"] as AstNode | undefined)?.["name"] as string | undefined) ?? local;
+        if (local === undefined || exported !== input.name) {
+          continue;
+        }
+        if (typeof source === "string") {
+          edges.push({ specifier: source, local });
+        } else {
+          const binding = importBindings.get(local);
+          if (binding !== undefined) {
+            edges.push({ specifier: binding.specifier, local: binding.imported });
+          }
+        }
+      }
+      continue;
+    }
+
+    const exportedAll = statement["exported"];
+    if (
+      statement.type === "ExportAllDeclaration" &&
+      (exportedAll === null || exportedAll === undefined)
+    ) {
+      const source = (statement["source"] as AstNode | null | undefined)?.["value"];
+      if (typeof source === "string") {
+        edges.push({ specifier: source, local: input.name });
+      }
+    }
+  }
+
+  for (const edge of edges) {
+    const next = await input.resolveSafe(edge.specifier, input.file);
+    if (next === null) {
+      continue;
+    }
+    if (isServerFilePath(next)) {
+      const analysis = input.analyze(next);
+      const isServerFn =
+        analysis !== null && analysis.serverFns.some((fn) => fn.name === edge.local);
+      if (!isServerFn) {
+        return next;
+      }
+      continue;
+    }
+    const deeper = await traceValueToServer({
+      ...input,
+      file: next,
+      name: edge.local,
+    });
+    if (deeper !== null) {
+      return deeper;
+    }
+  }
+  return null;
+}
+
+function loadTraceFile(file: string, cache: Map<string, TraceFileRecord>): TraceFileRecord | null {
+  const cached = cache.get(file);
+  if (cached !== undefined) {
+    return cached;
+  }
+  let record: TraceFileRecord | null = null;
+  try {
+    const source = readFileSync(file, "utf8");
+    // Pra-filter murah: hanya modul yang (a) menyebut `.server` atau (b)
+    // punya re-export (`export … from`) yang bisa menjadi mata rantai barrel.
+    const isBarrel = /(^|\n)\s*export\s+(\*|\{[^}]*\})\s+from\s/.test(source);
+    const mentionsServer = source.includes(".server") || isBarrel;
+    record = {
+      ast: mentionsServer ? parseModule(source, file) : null,
+      mentionsServer,
+    };
+  } catch {
+    record = null;
+  }
+  cache.set(file, record ?? { ast: null, mentionsServer: false });
+  return record;
+}
+
 export async function checkClientModuleImports(
   context: ClientImportCheckContext,
 ): Promise<void> {
   const { file, code, projectRoot, resolve, analyze } = context;
   const ast = parseModule(code, file);
+  const traceCache = new Map<string, TraceFileRecord>();
   const relativeFile = toRelative(projectRoot, file);
   // Addendum C: gate paket server-only (daftar bawaan ∪ security.serverOnlyPackages ∪ marker).
   const serverOnly = createServerOnlyClassifier({
@@ -990,6 +1130,65 @@ export async function checkClientModuleImports(
       const serverBySpecifier = isServerSpecifier(specifier);
       const serverByResolve = resolvedTarget !== null && isServerFilePath(resolvedTarget);
       if (!serverBySpecifier && !serverByResolve) {
+        // Addendum K.1: rantai re-export ke `*.server.ts` (barrel) — pesan Moons
+        // menggantikan `MISSING_EXPORT` bundler. Hanya nilai (bukan type-only).
+        if (!typeOnly && resolvedTarget !== null && /[.](ts|tsx)$/.test(resolvedTarget)) {
+          const requestedNames: string[] = [];
+          if (statement.type === "ImportDeclaration") {
+            for (const item of (statement["specifiers"] ?? []) as AstNode[]) {
+              if (item.type !== "ImportSpecifier") {
+                continue;
+              }
+              const kind = (item["importKind"] ?? statement["importKind"]) as string | undefined;
+              if (kind === "type") {
+                continue;
+              }
+              const imported = (item["imported"] as AstNode | undefined)?.["name"] as string | undefined;
+              if (imported !== undefined) {
+                requestedNames.push(imported);
+              }
+            }
+          } else if (statement.type === "ExportNamedDeclaration") {
+            for (const item of (statement["specifiers"] ?? []) as AstNode[]) {
+              const kind = (item["importKind"] ??
+                statement["importKind"] ??
+                item["exportKind"] ??
+                statement["exportKind"]) as string | undefined;
+              if (kind === "type") {
+                continue;
+              }
+              const local = (item["local"] as AstNode | undefined)?.["name"] as string | undefined;
+              if (local !== undefined) {
+                requestedNames.push(local);
+              }
+            }
+          }
+          for (const name of requestedNames) {
+            const serverFile = await traceValueToServer({
+              file: resolvedTarget,
+              name,
+              resolveSafe,
+              analyze,
+              cache: traceCache,
+              seen: new Set<string>(),
+            });
+            if (serverFile !== null) {
+              throw new MoonsError({
+                code: "E_SERVER_IMPORT_IN_CLIENT",
+                file: relativeFile,
+                line,
+                message: `mengimpor \`${name}\` — berasal dari \`${toRelative(projectRoot, serverFile)}\` (via rantai re-export)`,
+                details:
+                  `\`${toRelative(projectRoot, resolvedTarget)}\` me-re-export nilai dari file server; ` +
+                  "stub client tidak mengekspornya (dulu gagal dengan error mentah bundler `MISSING_EXPORT`).",
+                suggestions: [
+                  "Buat server function yang mengembalikan data yang dibutuhkan, atau",
+                  "Definisikan ulang konstanta publik itu di modul client-safe (jangan pindahkan nilai rahasia)",
+                ],
+              });
+            }
+          }
+        }
         continue;
       }
 
