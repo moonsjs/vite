@@ -1,19 +1,26 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { gzipSync } from "node:zlib";
+import { readFileSync, statSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import { extname, join, resolve, sep } from "node:path";
+import { extname, join, resolve } from "node:path";
 import {
   DEFAULT_BODY_LIMIT_BYTES,
-  MoonsError,
   trailingSlashRedirect,
   type PrerenderStorage,
 } from "@moonsjs/core";
-import { revalidatePrerendered, shouldRevalidate } from "./isr";
 import { contentTypeForPathname } from "./storage";
 import {
   BodyLimitError,
-  DEFAULT_SECURITY_HEADERS,
+  COMPRESSIBLE_FILE,
+  GZIP_MIN_BYTES,
   InvalidRequestError,
+  MIME_TYPES,
+  acceptsGzipHeader,
+  applyStaticHeaders,
+  gzipCached,
+  resolveStaticFile,
+  rpcBodyTooLargeText,
+  scheduleRevalidation,
+} from "./transport";
+import {
   resolveClientIp,
   resolveRequestUrl,
   sendNodeResponse,
@@ -23,27 +30,9 @@ import { createLogger, type Logger } from "./logger";
 import type { PluginRuntime } from "./plugins";
 import { installGracefulShutdown } from "./shutdown";
 
-const MIME_TYPES: Record<string, string> = {
-  ".js": "text/javascript; charset=utf-8",
-  ".mjs": "text/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".html": "text/html; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".map": "application/json; charset=utf-8",
-  ".ico": "image/x-icon",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".svg": "image/svg+xml",
-  ".webp": "image/webp",
-  ".avif": "image/avif",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-  ".ttf": "font/ttf",
-  ".txt": "text/plain; charset=utf-8",
-  ".wasm": "application/wasm",
-};
+// Kontrak lama tetap diekspor dari sini (index.ts & test lama).
+export { resolveStaticFile, staticFileTarget } from "./transport";
+export type { PrerenderManifestInfo } from "./transport";
 
 export interface NodeServerOptions {
   port?: number;
@@ -156,7 +145,11 @@ export function startNodeServer(
               });
               res.statusCode = 200;
               res.setHeader("content-type", contentTypeForPathname(url.pathname));
-              applyStaticHeaders(res, url.pathname, options.headers);
+              applyStaticHeaders(
+                { has: (name) => res.hasHeader(name), set: (name, value) => res.setHeader(name, value) },
+                url.pathname,
+                options.headers,
+              );
               res.end(req.method === "HEAD" ? undefined : Buffer.from(entry.body));
               return;
             }
@@ -182,7 +175,11 @@ export function startNodeServer(
               const stat = statSync(staticFile);
               res.statusCode = 200;
               res.setHeader("content-type", MIME_TYPES[extname(staticFile).toLowerCase()] ?? "application/octet-stream");
-              applyStaticHeaders(res, url.pathname, options.headers);
+              applyStaticHeaders(
+                { has: (name) => res.hasHeader(name), set: (name, value) => res.setHeader(name, value) },
+                url.pathname,
+                options.headers,
+              );
 
               // Addendum K.5: ETag + 304.
               const etag = `W/"${stat.size}-${Math.floor(stat.mtimeMs)}"`;
@@ -199,11 +196,15 @@ export function startNodeServer(
 
               // Addendum K.5: gzip untuk aset teks (cache per mtime).
               let payload: Buffer = body;
+              const encodings = req.headers["accept-encoding"];
+              const acceptsGzip = acceptsGzipHeader(
+                Array.isArray(encodings) ? (encodings[0] ?? null) : (encodings ?? null),
+              );
               if (
                 req.method === "GET" &&
                 COMPRESSIBLE_FILE.test(staticFile) &&
                 body.byteLength >= GZIP_MIN_BYTES &&
-                acceptsGzip(req)
+                acceptsGzip
               ) {
                 payload = gzipCached(staticFile, stat.mtimeMs, body);
                 res.setHeader("content-encoding", "gzip");
@@ -284,64 +285,6 @@ export function startNodeServer(
   return server;
 }
 
-/**
- * Addendum J.7: header konfigurasi (menang), default aman, dan
- * `Cache-Control: immutable` untuk aset ber-hash di `/assets/*`.
- */
-function applyStaticHeaders(
-  res: import("node:http").ServerResponse,
-  pathname: string,
-  configured: Record<string, string> | undefined,
-): void {
-  for (const [name, value] of Object.entries(configured ?? {})) {
-    if (!res.hasHeader(name)) {
-      res.setHeader(name, value);
-    }
-  }
-  for (const [name, value] of Object.entries(DEFAULT_SECURITY_HEADERS)) {
-    if (!res.hasHeader(name)) {
-      res.setHeader(name, value);
-    }
-  }
-  if (pathname.startsWith("/assets/") && !res.hasHeader("cache-control")) {
-    res.setHeader("cache-control", "public, max-age=31536000, immutable");
-  }
-}
-
-const COMPRESSIBLE_FILE = /\.(js|mjs|css|html|json|svg|txt|map|xml)$/i;
-const GZIP_MIN_BYTES = 1024;
-const GZIP_CACHE_MAX = 64;
-const gzipCache = new Map<string, { mtimeMs: number; gzip: Buffer }>();
-
-function acceptsGzip(req: import("node:http").IncomingMessage): boolean {
-  const header = req.headers["accept-encoding"];
-  if (typeof header !== "string") {
-    return false;
-  }
-  return header
-    .toLowerCase()
-    .split(",")
-    .map((part) => part.trim())
-    .some((part) => part === "gzip" || part === "*" || part.startsWith("gzip;"));
-}
-
-/** Varian gzip ter-cache per file+mtime (bounded FIFO) — Addendum K.5. */
-function gzipCached(file: string, mtimeMs: number, body: Buffer): Buffer {
-  const cached = gzipCache.get(file);
-  if (cached !== undefined && cached.mtimeMs === mtimeMs) {
-    return cached.gzip;
-  }
-  const gzip = gzipSync(body);
-  if (gzipCache.size >= GZIP_CACHE_MAX) {
-    const oldest = gzipCache.keys().next().value;
-    if (oldest !== undefined) {
-      gzipCache.delete(oldest);
-    }
-  }
-  gzipCache.set(file, { mtimeMs, gzip });
-  return gzip;
-}
-
 function appendVary(res: import("node:http").ServerResponse, value: string): void {
   const existing = res.getHeader("vary");
   if (typeof existing === "string" && existing.length > 0) {
@@ -358,174 +301,3 @@ function respondBadRequest(res: import("node:http").ServerResponse): void {
   res.setHeader("content-type", "text/plain; charset=utf-8");
   res.end("Bad Request");
 }
-
-/** 413 transport dengan format §15 yang sama seperti `rpc.ts` (Addendum J.2). */
-function rpcBodyTooLargeText(limit: number, size: number | null): string {
-  const megabytes = (bytes: number): string => (bytes / 1_000_000).toFixed(1);
-  return new MoonsError({
-    code: "E_RPC_BODY_TOO_LARGE",
-    message:
-      size === null
-        ? `body exceeds the ${megabytes(limit)} MB limit`
-        : `body ${megabytes(size)} MB exceeds the ${megabytes(limit)} MB limit`,
-    details:
-      "Body exceeds `security.bodyLimitBytes`; reading stops at the transport before the body is fully buffered.",
-    suggestions: [
-      "Reduce the payload size, or",
-      "Increase security.bodyLimitBytes if you really need to",
-    ],
-  }).format();
-}
-
-/** Resolve file static dengan proteksi path traversal (+ manifest prerender D.5). */
-export function resolveStaticFile(clientDir: string, pathname: string): string | null {
-  const target = staticFileTarget(clientDir, pathname);
-  return target !== null && isFile(target) ? target : null;
-}
-
-/**
- * Target file untuk `pathname` (tanpa cek keberadaan) — dipakai penyajian,
- * `createFileStorage().write`, dan test. Proteksi path traversal tetap.
- */
-export function staticFileTarget(clientDir: string, pathname: string): string | null {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(pathname);
-  } catch {
-    return null;
-  }
-
-  // 1) File persis (aset: js/css/png/…, atau HTML yang diminta eksplisit).
-  const exact = safeWithin(clientDir, `.${decoded}`);
-  if (exact !== null && isFile(exact)) {
-    return exact;
-  }
-
-  // 2) Hasil prerender: hanya path yang tercatat di manifest yang dilayani
-  //    statis — bukan shell `index.html` biasa (yang berarti bypass SSR).
-  const normalized = decoded.length > 1 ? decoded.replace(/\/+$/, "") : decoded;
-  const manifest = readPrerenderManifest(clientDir);
-  if (manifest.paths.has(normalized)) {
-    const target = normalized === "/" ? "index.html" : `${normalized.slice(1)}/index.html`;
-    return safeWithin(clientDir, `./${target}`);
-  }
-
-  return null;
-}
-
-function safeWithin(clientDir: string, relative: string): string | null {
-  const candidate = resolve(clientDir, relative);
-  if (candidate !== clientDir && !candidate.startsWith(clientDir + sep)) {
-    return null;
-  }
-  return candidate;
-}
-
-function isFile(path: string): boolean {
-  return existsSync(path) && statSync(path).isFile();
-}
-
-export interface PrerenderManifestInfo {
-  paths: Set<string>;
-  revalidate: Map<string, number>;
-}
-
-let prerenderManifestCache:
-  | { file: string; mtimeMs: number; info: PrerenderManifestInfo }
-  | null = null;
-
-function readPrerenderManifest(clientDir: string): PrerenderManifestInfo {
-  const file = join(clientDir, "_moons_prerender.json");
-  const empty: PrerenderManifestInfo = { paths: new Set(), revalidate: new Map() };
-  try {
-    const mtimeMs = statSync(file).mtimeMs;
-    if (
-      prerenderManifestCache !== null &&
-      prerenderManifestCache.file === file &&
-      prerenderManifestCache.mtimeMs === mtimeMs
-    ) {
-      return prerenderManifestCache.info;
-    }
-    const json = JSON.parse(readFileSync(file, "utf8")) as {
-      paths?: unknown;
-      version?: unknown;
-      entries?: unknown;
-    };
-    const paths = new Set<string>();
-    const revalidate = new Map<string, number>();
-    if (Array.isArray(json.paths)) {
-      // Manifest v1 (D.5) — tanpa revalidate.
-      for (const path of json.paths) {
-        if (typeof path === "string") {
-          paths.add(path);
-        }
-      }
-    }
-    if (Array.isArray(json.entries)) {
-      // Manifest v2 (E.1).
-      for (const entry of json.entries as Array<Record<string, unknown>>) {
-        if (entry === null || typeof entry !== "object" || typeof entry["path"] !== "string") {
-          continue;
-        }
-        const path = entry["path"] as string;
-        paths.add(path);
-        const seconds = entry["revalidate"];
-        if (typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0) {
-          revalidate.set(path, seconds);
-        }
-      }
-    }
-    const info = { paths, revalidate };
-    prerenderManifestCache = { file, mtimeMs, info };
-    return info;
-  } catch {
-    return empty;
-  }
-}
-
-/** ISR: jika file prerender kedaluwarsa, regenerasi background (SWR). */
-function scheduleRevalidation(input: {
-  pathname: string;
-  mtimeMs: number;
-  file?: string;
-  storage?: PrerenderStorage;
-  handler: (request: Request) => Promise<Response>;
-  options: NodeServerOptions;
-  clientDir: string;
-  logger?: Logger | null;
-}): void {
-  const normalized = input.pathname.length > 1 ? input.pathname.replace(/\/+$/, "") : input.pathname;
-  const seconds = readPrerenderManifest(input.clientDir).revalidate.get(normalized);
-  if (seconds === undefined || seconds < 0) {
-    return;
-  }
-  if (!shouldRevalidate({ mtimeMs: input.mtimeMs, revalidateSeconds: seconds })) {
-    return;
-  }
-  const regeneratedAt = performance.now();
-  const logger = input.logger ?? null;
-  void revalidatePrerendered({
-    pathname: normalized,
-    ...(input.file === undefined ? {} : { file: input.file }),
-    ...(input.storage === undefined ? {} : { storage: input.storage }),
-    handler: input.handler,
-    ...(input.options.canary === undefined ? {} : { canary: input.options.canary }),
-    env: process.env,
-  })
-    .then(() => {
-      logger?.({
-        msg: "isr:regenerated",
-        path: normalized,
-        durationMs: Math.round(performance.now() - regeneratedAt),
-      });
-    })
-    .catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      if (logger !== null) {
-        logger({ msg: "isr:revalidate-failed", level: "warn", path: normalized, error: message });
-      } else {
-        console.error(`[moons] isr regeneration failed (${normalized}): ${message}`);
-      }
-    });
-}
-

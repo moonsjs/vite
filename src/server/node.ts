@@ -2,34 +2,25 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { CLIENT_IP_HEADER } from "@moonsjs/core";
+import {
+  BodyLimitError,
+  DEFAULT_SECURITY_HEADERS,
+  InvalidRequestError,
+  MAX_TRANSPORT_BODY_BYTES,
+  forwardedHost,
+  forwardedProtocol,
+  resolveClientIpValues,
+  type ToWebRequestOptions,
+} from "./transport";
 
-/** Batas transport default (Addendum J.2); RPC punya batas lebih kecil dari config. */
-export const MAX_TRANSPORT_BODY_BYTES = 32 * 1024 * 1024;
-
-/** Request tidak valid (Host/URL malformed) → dipetakan ke 400 oleh server. */
-export class InvalidRequestError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "InvalidRequestError";
-  }
-}
-
-/** Body melebihi batas → dipetakan ke 413; pembacaan dihentikan saat melewati. */
-export class BodyLimitError extends Error {
-  readonly limit: number;
-  constructor(limit: number) {
-    super(`request body exceeds the ${limit} byte limit`);
-    this.name = "BodyLimitError";
-    this.limit = limit;
-  }
-}
-
-export interface ToWebRequestOptions {
-  /** Addendum J.1: percayai `x-forwarded-proto`/`x-forwarded-host` (default false). */
-  trustProxy?: boolean;
-  /** Batas pembacaan body (byte). Default: `MAX_TRANSPORT_BODY_BYTES`. */
-  maxBodyBytes?: number;
-}
+// Kontrak lama tetap diekspor dari sini (test & pemakai lama).
+export {
+  BodyLimitError,
+  DEFAULT_SECURITY_HEADERS,
+  InvalidRequestError,
+  MAX_TRANSPORT_BODY_BYTES,
+} from "./transport";
+export type { ToWebRequestOptions } from "./transport";
 
 /**
  * Rekonstruksi URL request (Addendum J.1). Tanpa `trustProxy`, origin/host
@@ -54,20 +45,11 @@ export function resolveRequestUrl(
 
 /** IP klien tepercaya (Addendum J.1): XFF (hanya bila trustProxy) → socket. */
 export function resolveClientIp(req: IncomingMessage, trustProxy: boolean): string | null {
-  if (trustProxy) {
-    const forwarded = firstHeaderValue(req.headers["x-forwarded-for"]);
-    if (forwarded !== null && isPlausibleIp(forwarded)) {
-      return normalizeIp(forwarded);
-    }
-  }
-  const remote = req.socket?.remoteAddress ?? null;
-  return remote === null ? null : normalizeIp(remote);
-}
-
-/** `::ffff:127.0.0.1` → `127.0.0.1`; buang zone id (`%eth0`). */
-function normalizeIp(value: string): string {
-  const withoutZone = stripZoneId(value);
-  return withoutZone.startsWith("::ffff:") ? withoutZone.slice(7) : withoutZone;
+  return resolveClientIpValues(
+    req.headers["x-forwarded-for"],
+    req.socket?.remoteAddress ?? null,
+    trustProxy,
+  );
 }
 
 /** Konversi request Node → Web `Request` (body diteruskan untuk non-GET/HEAD, §7.3 + J.1/J.2). */
@@ -150,12 +132,6 @@ export function readBody(req: IncomingMessage, maxBytes: number): Promise<Buffer
   });
 }
 
-/** Addendum J.7: default aman runtime; `config.headers` tetap menang (cek hasHeader). */
-export const DEFAULT_SECURITY_HEADERS: Record<string, string> = {
-  "x-content-type-options": "nosniff",
-  "referrer-policy": "strict-origin-when-cross-origin",
-};
-
 /** Tulis Web `Response` ke `ServerResponse` Node (streaming bila ada body). */
 export async function sendNodeResponse(res: ServerResponse, response: Response): Promise<void> {
   res.statusCode = response.status;
@@ -196,48 +172,4 @@ export async function sendNodeResponse(res: ServerResponse, response: Response):
     Readable.fromWeb(response.body as unknown as import("node:stream/web").ReadableStream),
     res,
   );
-}
-
-function firstHeaderValue(value: string | string[] | undefined): string | null {
-  if (value === undefined) {
-    return null;
-  }
-  const raw = Array.isArray(value) ? value[0] : value;
-  if (raw === undefined) {
-    return null;
-  }
-  const first = raw.split(",")[0]?.trim() ?? "";
-  return first.length === 0 ? null : first;
-}
-
-function forwardedProtocol(value: string | string[] | undefined): "http" | "https" | null {
-  const first = firstHeaderValue(value)?.toLowerCase() ?? null;
-  if (first === "https") {
-    return "https";
-  }
-  if (first === "http") {
-    return "http";
-  }
-  return null;
-}
-
-function forwardedHost(value: string | string[] | undefined): string | null {
-  const first = firstHeaderValue(value);
-  if (first === null || first.length === 0 || first.length > 255) {
-    return null;
-  }
-  // hostname[:port] — tolak karakter di luar himpunan aman (spasi, CRLF, /, @, ?).
-  if (!/^[A-Za-z0-9.\-[\]:]+$/.test(first)) {
-    return null;
-  }
-  return first;
-}
-
-function isPlausibleIp(value: string): boolean {
-  return value.length <= 64 && /^[0-9a-fA-F:.]+$/.test(value);
-}
-
-function stripZoneId(value: string): string {
-  const index = value.indexOf("%");
-  return index === -1 ? value : value.slice(0, index);
 }

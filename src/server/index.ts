@@ -3,6 +3,8 @@ export type { RequestHandlerOptions } from "./handler";
 export { createDevShell, createFileShell, injectShell, DEFAULT_TEMPLATE, ROOT_PLACEHOLDER } from "./shell";
 export type { Shell } from "./shell";
 export { startNodeServer, resolveStaticFile } from "./node-server";
+export { startBunServer } from "./bun-server";
+export { startServer } from "./server-select";
 export type { NodeServerOptions } from "./node-server";
 export { installGracefulShutdown } from "./shutdown";
 export type { ShutdownOptions } from "./shutdown";
