@@ -25,11 +25,15 @@ import type { renderToMarkup as RenderToMarkupFn } from "@moonsjs/react/ssr";
 
 type RenderMarkup = typeof RenderToMarkupFn;
 
-/** Default: bare dynamic import (bundlers keep this resolvable). */
-async function defaultRenderer(): Promise<RenderMarkup> {
-  const mod = (await import("@moonsjs/react/ssr")) as { renderToMarkup: RenderMarkup };
-  return mod.renderToMarkup;
-}
+/**
+ * Default renderer, kicked off at module load (never inside a request: a
+ * dynamic import started during a request loses AsyncLocalStorage context in
+ * Bun, dropping response-helper mutations). Consumers that cannot resolve
+ * peers through Bun's install cache inject `renderer` instead (test server).
+ */
+const defaultRenderer: Promise<RenderMarkup | null> = import("@moonsjs/react/ssr")
+  .then((mod) => (mod as { renderToMarkup: RenderMarkup }).renderToMarkup)
+  .catch(() => null);
 import type { ClientRouteEntry, RouteModuleShape } from "@moonsjs/react/internal";
 import { createRpcHandler, runWithContext, runWithRequestCache, runWithResponseCollector, takeResponseMutations } from "@moonsjs/server";
 import { NOT_FOUND_ROUTE_KEY } from "../manifest";
@@ -84,9 +88,24 @@ export function createRequestHandler(
 ): (request: Request) => Promise<Response> {
   let renderMarkup: RenderMarkup | null = null;
   const getRenderMarkup = async (): Promise<RenderMarkup> => {
-    if (renderMarkup === null) {
-      renderMarkup = await (options.renderer ?? defaultRenderer)();
+    if (renderMarkup !== null) {
+      return renderMarkup;
     }
+    const resolved = options.renderer === undefined ? await defaultRenderer : await options.renderer();
+    if (resolved === null) {
+      throw new MoonsError({
+        code: "E_INTERNAL",
+        message: "SSR renderer could not be loaded",
+        details:
+          "`@moonsjs/react/ssr` is not resolvable with its peers from this process. " +
+          "Run tests through `moons test`, which injects an app-resolved renderer.",
+        suggestions: [
+          "Use `moons test` instead of a bare `bun test`",
+          "Ensure @moonsjs/react and react-dom are installed in the app",
+        ],
+      });
+    }
+    renderMarkup = resolved;
     return renderMarkup;
   };
   const { routes, config, routesDir, loadRoute, shell } = options;
