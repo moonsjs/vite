@@ -13,6 +13,12 @@ import {
   toWebRequest,
 } from "./node";
 import { DEFAULT_BODY_LIMIT_BYTES } from "@moonsjs/core";
+import {
+  RequestTimeoutError,
+  applyStaticHeaders,
+  requestTimeoutText,
+  runHandlerWithTimeout,
+} from "./transport";
 import { emptyDevtoolsData, renderDevtoolsHtml, type DevtoolsData } from "../devtools";
 
 interface DevApp {
@@ -41,6 +47,8 @@ export function installDevMiddleware(
     /** Addendum J.1: paritas dev dengan produksi (trustProxy/bodyLimitBytes). */
     trustProxy?: boolean;
     bodyLimitBytes?: number;
+    /** Addendum R: batas waktu respons (ms); 0/undefined = tanpa batas. */
+    requestTimeoutMs?: number;
     /** Addendum I.4: datasource devtools overlay (dipanggil per request). */
     devtools?: () => DevtoolsData;
   },
@@ -110,7 +118,7 @@ async function handleRequest(
   getApp: () => Promise<DevApp>,
   req: IncomingMessage,
   res: ServerResponse,
-  options: { trustProxy?: boolean; bodyLimitBytes?: number },
+  options: { trustProxy?: boolean; bodyLimitBytes?: number; requestTimeoutMs?: number },
 ): Promise<void> {
   const app = await getApp();
   const url = resolveRequestUrl(req, { trustProxy: options.trustProxy === true });
@@ -119,7 +127,24 @@ async function handleRequest(
     trustProxy: options.trustProxy === true,
     ...(isRpc ? { maxBodyBytes: options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES } : {}),
   });
-  const response = await app.handler(request);
+  // Addendum R: paritas dev — batas waktu eksplisit yang sama dengan produksi.
+  let response: Response;
+  try {
+    response = await runHandlerWithTimeout(app.handler, request, options.requestTimeoutMs);
+  } catch (error) {
+    if (error instanceof RequestTimeoutError) {
+      res.statusCode = 504;
+      res.setHeader("content-type", "text/plain; charset=utf-8");
+      applyStaticHeaders(
+        { has: (name) => res.hasHeader(name), set: (name, value) => res.setHeader(name, value) },
+        "/",
+        undefined,
+      );
+      res.end(requestTimeoutText(error.limit));
+      return;
+    }
+    throw error;
+  }
   await sendNodeResponse(res, response);
 }
 

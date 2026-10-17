@@ -60,6 +60,7 @@ export default function moons(options: MoonsVitePluginOptions = {}): Plugin {
   // Addendum J.1/J.2: paritas dev & produksi (paritas E7).
   let trustProxy = false;
   let bodyLimitBytes: number | undefined;
+  let requestTimeoutMs: number | undefined;
   let apiDir = "";
   let apiRoutes: ApiRouteDefinition[] = [];
   let apiMiddlewares: ApiMiddlewareDefinition[] = [];
@@ -251,6 +252,7 @@ export default function moons(options: MoonsVitePluginOptions = {}): Plugin {
       serverOnlyPackages = config.security?.serverOnlyPackages ?? [];
       trustProxy = config.security?.trustProxy === true;
       bodyLimitBytes = config.security?.bodyLimitBytes;
+      requestTimeoutMs = config.requestTimeoutMs;
 
       // Addendum D.1: scan + validasi statis modul `src/api`.
       apiDir = resolvePath(root, config.apiDir ?? "src/api");
@@ -466,6 +468,7 @@ export default function moons(options: MoonsVitePluginOptions = {}): Plugin {
           : { apiPrefix: `/${apiDir.split(/[\\/]/).filter((part) => part.length > 0).pop() ?? "api"}` }),
         trustProxy,
         ...(bodyLimitBytes === undefined ? {} : { bodyLimitBytes }),
+        ...(requestTimeoutMs === undefined ? {} : { requestTimeoutMs }),
       });
       server.config.logger.info("[moons] devtools: /__moons/devtools");
     },
@@ -579,7 +582,7 @@ function renderServerEntryBuild(
     "  onContext: (ctx) => plugins.applyExtensions(ctx),",
     "});",
     "",
-    `startServer(handler, { plugins, headers: config.headers, storage: config.isr?.storage, trustProxy: config.security?.trustProxy, bodyLimitBytes: config.security?.bodyLimitBytes, logging: config.logging, trailingSlash: config.trailingSlash${canary === undefined ? "" : `, canary: ${JSON.stringify(canary)}`} });`,
+    `startServer(handler, { plugins, headers: config.headers, storage: config.isr?.storage, trustProxy: config.security?.trustProxy, bodyLimitBytes: config.security?.bodyLimitBytes, requestTimeoutMs: config.requestTimeoutMs, logging: config.logging, trailingSlash: config.trailingSlash${canary === undefined ? "" : `, canary: ${JSON.stringify(canary)}`} });`,
     "",
   ].join("\n");
 }

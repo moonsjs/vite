@@ -13,11 +13,15 @@ import {
   GZIP_MIN_BYTES,
   InvalidRequestError,
   MIME_TYPES,
+  RequestTimeoutError,
   acceptsGzipHeader,
   applyStaticHeaders,
   gzipCached,
+  isAbortLike,
+  requestTimeoutText,
   resolveStaticFile,
   rpcBodyTooLargeText,
+  runHandlerWithTimeout,
   scheduleRevalidation,
 } from "./transport";
 import {
@@ -64,6 +68,8 @@ export interface NodeServerOptions {
   logging?: { accessLog?: boolean; json?: boolean; redact?: string[] };
   /** Addendum M: kebijakan trailing slash (juga untuk path prerender/static). */
   trailingSlash?: "never" | "always";
+  /** Addendum R: batas waktu respons handler (ms); `0` menonaktifkan. */
+  requestTimeoutMs?: number;
 }
 
 /**
@@ -109,7 +115,7 @@ export function startNodeServer(
       } catch (error) {
         if (error instanceof InvalidRequestError) {
           console.warn(`[moons] ${error.message} — 400`);
-          respondBadRequest(res);
+          respondText(res, 400, "Bad Request", options.headers);
           return;
         }
         throw error;
@@ -132,7 +138,19 @@ export function startNodeServer(
         if (req.method === "GET" || req.method === "HEAD") {
           // Addendum I: storage bersama (bila dikonfigurasi) diutamakan.
           if (options.storage !== undefined) {
-            const entry = await options.storage.read(url.pathname);
+            // Addendum R (review G2): storage error = miss — aset & halaman
+            // non-ISR harus tetap jalan saat store bersama outage.
+            let entry: Awaited<ReturnType<PrerenderStorage["read"]>> | null = null;
+            try {
+              entry = await options.storage.read(url.pathname);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : String(error);
+              if (accessLogger !== null) {
+                accessLogger({ msg: "isr:storage-read-failed", level: "warn", path: url.pathname, error: message });
+              } else {
+                console.warn(`[moons] isr storage read failed (${url.pathname}): ${message} — falling back to dist/client`);
+              }
+            }
             if (entry !== null) {
               scheduleRevalidation({
                 pathname: url.pathname,
@@ -223,9 +241,7 @@ export function startNodeServer(
         if (isRpc) {
           const contentLength = Number(req.headers["content-length"] ?? "0");
           if (Number.isFinite(contentLength) && contentLength > rpcLimit) {
-            res.statusCode = 413;
-            res.setHeader("content-type", "text/plain; charset=utf-8");
-            res.end(rpcBodyTooLargeText(rpcLimit, contentLength));
+            respondText(res, 413, rpcBodyTooLargeText(rpcLimit, contentLength), options.headers);
             res.once("finish", () => req.destroy());
             return;
           }
@@ -235,22 +251,57 @@ export function startNodeServer(
           trustProxy: options.trustProxy === true,
           ...(isRpc ? { maxBodyBytes: rpcLimit } : {}),
         });
-        const response = await handler(request);
+        // Addendum R: batas waktu eksplisit; 0/undefined = tanpa batas.
+        const response = await runHandlerWithTimeout(handler, request, options.requestTimeoutMs);
         await sendNodeResponse(res, response);
       } catch (error) {
         if (error instanceof BodyLimitError) {
           const isRpc = url.pathname.startsWith("/_moons/fn/");
-          res.statusCode = 413;
-          res.setHeader("content-type", "text/plain; charset=utf-8");
-          res.end(isRpc ? rpcBodyTooLargeText(error.limit, null) : "Payload Too Large");
+          respondText(
+            res,
+            413,
+            isRpc ? rpcBodyTooLargeText(error.limit, null) : "Payload Too Large",
+            options.headers,
+          );
           // Sisa body tidak perlu dibaca — putuskan setelah respons terkirim.
           res.once("finish", () => req.destroy());
           return;
         }
+        // Addendum R: timeout eksplisit — 504 + log terstruktur.
+        if (error instanceof RequestTimeoutError) {
+          if (accessLogger !== null) {
+            accessLogger({
+              msg: "request-timeout",
+              level: "warn",
+              method: req.method ?? "GET",
+              path: url.pathname + url.search,
+              limitMs: error.limit,
+            });
+          } else {
+            console.warn(`[moons] request timed out after ${error.limit}ms — ${req.method ?? "GET"} ${url.pathname}`);
+          }
+          respondText(res, 504, requestTimeoutText(error.limit), options.headers);
+          return;
+        }
+        // Review G7: abort klien/koneksi putus bukan error server (tanpa stack).
+        if (isAbortLike(error)) {
+          if (accessLogger !== null) {
+            accessLogger({
+              msg: "request-aborted",
+              level: "warn",
+              method: req.method ?? "GET",
+              path: url.pathname + url.search,
+            });
+          } else {
+            console.warn(`[moons] request aborted by the client — ${req.method ?? "GET"} ${url.pathname}`);
+          }
+          if (!res.headersSent && !res.writableEnded) {
+            respondText(res, 499, "Client Closed Request", options.headers);
+          }
+          return;
+        }
         console.error("[moons] server error:", error);
-        res.statusCode = 500;
-        res.setHeader("content-type", "text/plain; charset=utf-8");
-        res.end("Internal Server Error");
+        respondText(res, 500, "Internal Server Error", options.headers);
       }
     })();
   });
@@ -296,8 +347,19 @@ function appendVary(res: import("node:http").ServerResponse, value: string): voi
   res.setHeader("vary", value);
 }
 
-function respondBadRequest(res: import("node:http").ServerResponse): void {
-  res.statusCode = 400;
+/** Respons teks transport — ikut membawa header config + default aman (review G6). */
+function respondText(
+  res: import("node:http").ServerResponse,
+  status: number,
+  text: string,
+  configured: Record<string, string> | undefined,
+): void {
+  res.statusCode = status;
   res.setHeader("content-type", "text/plain; charset=utf-8");
-  res.end("Bad Request");
+  applyStaticHeaders(
+    { has: (name) => res.hasHeader(name), set: (name, value) => res.setHeader(name, value) },
+    "/",
+    configured,
+  );
+  res.end(text);
 }

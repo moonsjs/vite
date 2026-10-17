@@ -134,6 +134,16 @@ export const MIME_TYPES: Record<string, string> = {
   ".ttf": "font/ttf",
   ".txt": "text/plain; charset=utf-8",
   ".wasm": "application/wasm",
+  ".xml": "application/xml; charset=utf-8",
+  ".csv": "text/csv; charset=utf-8",
+  ".md": "text/markdown; charset=utf-8",
+  ".pdf": "application/pdf",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".zip": "application/zip",
+  ".gz": "application/gzip",
 };
 
 export const COMPRESSIBLE_FILE = /\.(js|mjs|css|html|json|svg|txt|map|xml)$/i;
@@ -185,6 +195,86 @@ export function rpcBodyTooLargeText(limit: number, size: number | null): string 
       "Increase security.bodyLimitBytes if you really need to",
     ],
   }).format();
+}
+
+/** Handler melewati `requestTimeoutMs` → transport menjawab 504 (Addendum R). */
+export class RequestTimeoutError extends Error {
+  readonly limit: number;
+  constructor(limit: number) {
+    super(`handler did not respond within ${limit} ms`);
+    this.name = "RequestTimeoutError";
+    this.limit = limit;
+  }
+}
+
+/** 504 dengan format §15 (dipakai kedua transport). */
+export function requestTimeoutText(limit: number): string {
+  return new MoonsError({
+    code: "E_REQUEST_TIMEOUT",
+    message: `handler did not respond within ${limit} ms`,
+    details:
+      "The transport stopped waiting for the handler and answered 504. " +
+      "The handler keeps running until it settles; JavaScript cannot cancel it.",
+    suggestions: [
+      "Make the handler faster, or move slow work out of the request path",
+      "Raise `requestTimeoutMs`, or set it to 0 to disable the timeout",
+    ],
+  }).format();
+}
+
+/**
+ * Jalankan handler dengan batas waktu eksplisit (Addendum R; review G1).
+ * `timeoutMs` undefined/0 → tanpa batas (perilaku lama).
+ */
+export async function runHandlerWithTimeout(
+  handler: (request: Request) => Promise<Response>,
+  request: Request,
+  timeoutMs: number | undefined,
+): Promise<Response> {
+  if (timeoutMs === undefined || timeoutMs <= 0) {
+    return handler(request);
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new RequestTimeoutError(timeoutMs)), timeoutMs);
+  });
+  try {
+    return await Promise.race([handler(request), timeout]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+/** Klasifikasi abort klien / koneksi putus (review G7) — bukan error server. */
+export function isAbortLike(error: unknown): boolean {
+  if (error instanceof DOMException) {
+    return error.name === "AbortError" || error.name === "TimeoutError";
+  }
+  if (error instanceof Error) {
+    if (error.name === "AbortError") {
+      return true;
+    }
+    const code = (error as { code?: unknown }).code;
+    if (code === "ECONNRESET" || code === "EPIPE" || code === "ERR_STREAM_PREMATURE_CLOSE") {
+      return true;
+    }
+    const message = error.message.toLowerCase();
+    return message === "aborted" || message.includes("aborted") || message.includes("premature close");
+  }
+  return false;
+}
+
+/** Respons teks transport (400/413/500/504) — tetap membawa header config + default aman (review G6). */
+export function textResponseWithHeaders(
+  status: number,
+  text: string,
+  configured?: Record<string, string>,
+): Response {
+  const headers = new Headers({ "content-type": "text/plain; charset=utf-8" });
+  applyStaticHeaders(headers, "/", configured);
+  return new Response(text, { status, headers });
 }
 
 /** Target header minimal yang dipenuhi `ServerResponse` dan `Headers`. */

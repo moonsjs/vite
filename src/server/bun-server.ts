@@ -10,16 +10,21 @@ import {
   InvalidRequestError,
   MAX_TRANSPORT_BODY_BYTES,
   MIME_TYPES,
+  RequestTimeoutError,
   acceptsGzipHeader,
   applyStaticHeaders,
   forwardedHost,
   forwardedProtocol,
   gzipCached,
+  isAbortLike,
   readBodyWithLimit,
+  requestTimeoutText,
   resolveClientIpValues,
   resolveStaticFile,
   rpcBodyTooLargeText,
+  runHandlerWithTimeout,
   scheduleRevalidation,
+  textResponseWithHeaders,
 } from "./transport";
 import { createLogger, type Logger } from "./logger";
 import type { NodeServerOptions } from "./node-server";
@@ -36,9 +41,6 @@ interface BunServerHandle {
   port: number;
   stop(closeActiveConnections?: boolean): Promise<void>;
 }
-
-const textResponse = (status: number, text: string): Response =>
-  new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
 
 function appendVaryHeader(headers: Headers, value: string): void {
   const existing = headers.get("vary");
@@ -192,6 +194,13 @@ export function startBunServer(
   const clientDir = resolve(options.clientDir ?? join(process.cwd(), "dist/client"));
   const port = options.port ?? Number(process.env["PORT"] ?? 3000);
   const trustProxy = options.trustProxy === true;
+  const requestTimeoutMs = options.requestTimeoutMs;
+  // Addendum R: idleTimeout Bun diselaraskan dengan batas kita (+5 dtk grace)
+  // supaya 504 dari framework yang menang, bukan koneksi diputus diam-diam.
+  const idleTimeout =
+    requestTimeoutMs === undefined || requestTimeoutMs <= 0
+      ? 0
+      : Math.ceil(requestTimeoutMs / 1000) + 5;
   const accessLogger: Logger | null =
     options.logging?.accessLog === true
       ? createLogger({
@@ -205,7 +214,19 @@ export function startBunServer(
     url: URL,
   ): Promise<Response | null> => {
     if (options.storage !== undefined) {
-      const entry = await options.storage.read(url.pathname);
+      // Addendum R (review G2): storage error = miss — aset & halaman non-ISR
+      // harus tetap jalan saat store bersama outage.
+      let entry: Awaited<ReturnType<NonNullable<typeof options.storage>["read"]>> | null = null;
+      try {
+        entry = await options.storage.read(url.pathname);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (accessLogger !== null) {
+          accessLogger({ msg: "isr:storage-read-failed", level: "warn", path: url.pathname, error: message });
+        } else {
+          console.warn(`[moons] isr storage read failed (${url.pathname}): ${message} — falling back to dist/client`);
+        }
+      }
       if (entry !== null) {
         scheduleRevalidation({
           pathname: url.pathname,
@@ -274,6 +295,7 @@ export function startBunServer(
 
   const server = Bun.serve({
     port,
+    idleTimeout,
     fetch: async (request, bunServer) => {
       const requestStartedAt = performance.now();
       let url: URL;
@@ -282,7 +304,7 @@ export function startBunServer(
       } catch (error) {
         if (error instanceof InvalidRequestError) {
           console.warn(`[moons] ${error.message} — 400`);
-          return textResponse(400, "Bad Request");
+          return textResponseWithHeaders(400, "Bad Request", options.headers);
         }
         throw error;
       }
@@ -324,7 +346,9 @@ export function startBunServer(
         if (isRpc) {
           const contentLength = Number(request.headers.get("content-length") ?? "0");
           if (Number.isFinite(contentLength) && contentLength > rpcLimit) {
-            return finish(textResponse(413, rpcBodyTooLargeText(rpcLimit, contentLength)));
+            return finish(
+              textResponseWithHeaders(413, rpcBodyTooLargeText(rpcLimit, contentLength), options.headers),
+            );
           }
         }
 
@@ -346,17 +370,51 @@ export function startBunServer(
                 clientIp,
                 isRpc ? rpcLimit : MAX_TRANSPORT_BODY_BYTES,
               );
-        const response = await handler(webRequest);
+        // Addendum R: batas waktu eksplisit; 0/undefined = tanpa batas.
+        const response = await runHandlerWithTimeout(handler, webRequest, requestTimeoutMs);
         return finish(withDefaultSecurityHeaders(response));
       } catch (error) {
         if (error instanceof BodyLimitError) {
           const isRpc = url.pathname.startsWith("/_moons/fn/");
           return finish(
-            textResponse(413, isRpc ? rpcBodyTooLargeText(error.limit, null) : "Payload Too Large"),
+            textResponseWithHeaders(
+              413,
+              isRpc ? rpcBodyTooLargeText(error.limit, null) : "Payload Too Large",
+              options.headers,
+            ),
           );
         }
+        // Addendum R: timeout eksplisit — 504 + log terstruktur.
+        if (error instanceof RequestTimeoutError) {
+          if (accessLogger !== null) {
+            accessLogger({
+              msg: "request-timeout",
+              level: "warn",
+              method: request.method,
+              path: url.pathname + url.search,
+              limitMs: error.limit,
+            });
+          } else {
+            console.warn(`[moons] request timed out after ${error.limit}ms — ${request.method} ${url.pathname}`);
+          }
+          return finish(textResponseWithHeaders(504, requestTimeoutText(error.limit), options.headers));
+        }
+        // Review G7: abort klien/koneksi putus bukan error server (tanpa stack).
+        if (isAbortLike(error)) {
+          if (accessLogger !== null) {
+            accessLogger({
+              msg: "request-aborted",
+              level: "warn",
+              method: request.method,
+              path: url.pathname + url.search,
+            });
+          } else {
+            console.warn(`[moons] request aborted by the client — ${request.method} ${url.pathname}`);
+          }
+          return new Response(null, { status: 499 });
+        }
         console.error("[moons] server error:", error);
-        return finish(textResponse(500, "Internal Server Error"));
+        return finish(textResponseWithHeaders(500, "Internal Server Error", options.headers));
       }
     },
   });

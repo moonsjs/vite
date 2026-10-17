@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.0 — 2026-10-17
+- feat: explicit handler timeout on all transports (504 `E_REQUEST_TIMEOUT`; Bun `idleTimeout` aligned)
+- fix: `isr.storage.read` errors fall back to `dist/client` instead of 500 (review G2)
+- fix: security headers on transport error responses; abort/timeout log classification
+- fix: MIME types for `.xml/.csv/.md/.pdf/media/archives`; docs body/content-length correction
+
 All notable changes to this package. Entries mirror commit subjects;
 releases are tagged `vX.Y.Z` in the package repository.
 
