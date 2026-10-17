@@ -26,14 +26,18 @@ import type { renderToMarkup as RenderToMarkupFn } from "@moonsjs/react/ssr";
 type RenderMarkup = typeof RenderToMarkupFn;
 
 /**
- * Default renderer, kicked off at module load (never inside a request: a
- * dynamic import started during a request loses AsyncLocalStorage context in
- * Bun, dropping response-helper mutations). Consumers that cannot resolve
- * peers through Bun's install cache inject `renderer` instead (test server).
+ * Fallback renderer for direct `createRequestHandler` users. Generated entries
+ * (dev/build/prerender) and the test server inject an app-resolved renderer;
+ * test preloads set `__moons_renderToMarkup` — awaiting a dynamic import inside
+ * a request drops AsyncLocalStorage context in Bun, which breaks response
+ * helpers. Keep this path lazy and preloaded in tests.
  */
-const defaultRenderer: Promise<RenderMarkup | null> = import("@moonsjs/react/ssr")
-  .then((mod) => (mod as { renderToMarkup: RenderMarkup }).renderToMarkup)
-  .catch(() => null);
+function loadDefaultRenderer(): Promise<RenderMarkup | null> {
+  return import("@moonsjs/react/ssr")
+    .then((mod) => (mod as { renderToMarkup: RenderMarkup }).renderToMarkup)
+    .catch(() => null);
+}
+let defaultRenderer: Promise<RenderMarkup | null> | null = null;
 import type { ClientRouteEntry, RouteModuleShape } from "@moonsjs/react/internal";
 import { createRpcHandler, runWithContext, runWithRequestCache, runWithResponseCollector, takeResponseMutations } from "@moonsjs/server";
 import { NOT_FOUND_ROUTE_KEY } from "../manifest";
@@ -98,7 +102,10 @@ export function createRequestHandler(
       renderMarkup = injected as RenderMarkup;
       return renderMarkup;
     }
-    const resolved = options.renderer === undefined ? await defaultRenderer : await options.renderer();
+    const resolved =
+      options.renderer === undefined
+        ? await (defaultRenderer ??= loadDefaultRenderer())
+        : await options.renderer();
     if (resolved === null) {
       throw new MoonsError({
         code: "E_INTERNAL",
