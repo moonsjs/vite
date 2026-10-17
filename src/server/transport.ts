@@ -36,6 +36,8 @@ export interface ToWebRequestOptions {
   trustProxy?: boolean;
   /** Batas pembacaan body (byte). Default: `MAX_TRANSPORT_BODY_BYTES`. */
   maxBodyBytes?: number;
+  /** Addendum S: header tepercaya untuk IP klien (default `x-forwarded-for`). */
+  clientIpHeader?: string;
 }
 
 /** Addendum J.7: default aman runtime; `config.headers` tetap menang (cek `has`). */

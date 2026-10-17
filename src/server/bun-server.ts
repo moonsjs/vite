@@ -195,6 +195,7 @@ export function startBunServer(
   const port = options.port ?? Number(process.env["PORT"] ?? 3000);
   const trustProxy = options.trustProxy === true;
   const requestTimeoutMs = options.requestTimeoutMs;
+  const clientIpHeader = options.clientIpHeader ?? "x-forwarded-for";
   // Addendum R: idleTimeout Bun diselaraskan dengan batas kita (+5 dtk grace)
   // supaya 504 dari framework yang menang, bukan koneksi diputus diam-diam.
   const idleTimeout =
@@ -354,7 +355,7 @@ export function startBunServer(
 
         const remoteAddress = bunServer.requestIP(request)?.address ?? null;
         clientIp = resolveClientIpValues(
-          request.headers.get("x-forwarded-for") ?? undefined,
+          request.headers.get(clientIpHeader) ?? undefined,
           remoteAddress,
           trustProxy,
         );

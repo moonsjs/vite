@@ -6,9 +6,9 @@
       "name": "@moonsjs/vite",
       "dependencies": {
         "@babel/parser": "^8.0.7",
-        "@moonsjs/core": "^0.5.0",
-        "@moonsjs/react": "^0.5.0",
-        "@moonsjs/server": "^0.5.0",
+        "@moonsjs/core": "^0.6.0",
+        "@moonsjs/react": "^0.6.0",
+        "@moonsjs/server": "^0.6.0",
       },
       "devDependencies": {
         "@types/bun": "^1.4.3",
@@ -33,11 +33,11 @@
 
     "@babel/types": ["@babel/types@8.0.6", "", { "dependencies": { "@babel/helper-string-parser": "^8.0.6", "@babel/helper-validator-identifier": "^8.0.6" } }, "sha512-c+xgSWboV2pdwXP67BUWDVRHi2BO5Q3KwxyFVs7taVTY+fsK47/L51ZXQoV9rozHJDNHvJ4v4WEsI/IlxV2l2A=="],
 
-    "@moonsjs/core": ["@moonsjs/core@0.5.0", "", { "dependencies": { "devalue": "^6.0.3" } }, "sha512-ezD1zIP7jI0x5q4uATDsuys/cMaU3g6SKj08cJNDhYMq6Orr/RLqrhc1Gg/mTrIoF65NRoJ6+FO56PtOQPc2oA=="],
+    "@moonsjs/core": ["@moonsjs/core@0.6.0", "", { "dependencies": { "devalue": "^6.0.3" } }, "sha512-IsbsXJ/iXcnRy3Hz8bammCRzWy0tYFa3tSd7h8rqQ3GPGXBPaqfGsvd4dPgZ6606orvikTEzR8MXI0fGKhFTtg=="],
 
-    "@moonsjs/react": ["@moonsjs/react@0.5.0", "", { "dependencies": { "@moonsjs/core": "^0.5.0" }, "peerDependencies": { "react": "^19.3.0", "react-dom": "^19.3.0" } }, "sha512-9fM+JULVbdgH7D3lOBQGzD8bxNzwYLm0YON7DEo0fOhf1aeC5JMyr24L60cAHkMVp4vvaC4O/Muq4VnonzeBuQ=="],
+    "@moonsjs/react": ["@moonsjs/react@0.6.0", "", { "dependencies": { "@moonsjs/core": "^0.6.0" }, "peerDependencies": { "react": "^19.3.0", "react-dom": "^19.3.0" } }, "sha512-NbkWcAzQD+bwrUxPXuhd/5/g+IkExDAbtlrkdm4/9B2iEIfhLePLv0cMy4BitJ6qkJrFMClT3NPUicaSD83MHA=="],
 
-    "@moonsjs/server": ["@moonsjs/server@0.5.0", "", { "dependencies": { "@moonsjs/core": "^0.5.0", "@standard-schema/spec": "^1.1.0", "devalue": "^6.0.3" } }, "sha512-OSpcb6Ty4cXSm2w5pH5o88vfexBl4OSysKPlWaFncS2YmZYQA8z+2CmQUp9YVFYxqMxajMMufhfL2VI0v0iJLw=="],
+    "@moonsjs/server": ["@moonsjs/server@0.6.0", "", { "dependencies": { "@moonsjs/core": "^0.6.0", "@standard-schema/spec": "^1.1.0", "devalue": "^6.0.3" } }, "sha512-kyCmy0NNjLUN/6HQsqRHpIZZuiwQQ3E63ugcQyTtk2XLvlLwuRwC/cc2R1oWRyNf6TEMducG3Dziw75u/ySJvQ=="],
 
     "@oxc-project/types": ["@oxc-project/types@0.154.0", "", {}, "sha512-KYOUGQFlLWR+s4QMV2Q9ko38TZm7EdO87Qm7rvZLqk/webse/cDjtyxKhg/47l0byCbs/k46LT8qc4PKjAikzA=="],
 

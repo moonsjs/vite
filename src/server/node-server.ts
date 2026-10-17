@@ -70,6 +70,8 @@ export interface NodeServerOptions {
   trailingSlash?: "never" | "always";
   /** Addendum R: batas waktu respons handler (ms); `0` menonaktifkan. */
   requestTimeoutMs?: number;
+  /** Addendum S: header tepercaya untuk IP klien (default `x-forwarded-for`). */
+  clientIpHeader?: string;
 }
 
 /**
@@ -95,7 +97,11 @@ export function startNodeServer(
     const requestStartedAt = performance.now();
     if (accessLogger !== null) {
       res.once("finish", () => {
-        const ip = resolveClientIp(req, options.trustProxy === true);
+        const ip = resolveClientIp(
+          req,
+          options.trustProxy === true,
+          options.clientIpHeader ?? "x-forwarded-for",
+        );
         accessLogger({
           msg: "request",
           method: req.method ?? "GET",
@@ -249,6 +255,7 @@ export function startNodeServer(
 
         const request = await toWebRequest(req, {
           trustProxy: options.trustProxy === true,
+          ...(options.clientIpHeader === undefined ? {} : { clientIpHeader: options.clientIpHeader }),
           ...(isRpc ? { maxBodyBytes: rpcLimit } : {}),
         });
         // Addendum R: batas waktu eksplisit; 0/undefined = tanpa batas.

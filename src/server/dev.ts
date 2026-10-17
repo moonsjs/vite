@@ -49,6 +49,8 @@ export function installDevMiddleware(
     bodyLimitBytes?: number;
     /** Addendum R: batas waktu respons (ms); 0/undefined = tanpa batas. */
     requestTimeoutMs?: number;
+    /** Addendum S: header tepercaya untuk IP klien (default `x-forwarded-for`). */
+    clientIpHeader?: string;
     /** Addendum I.4: datasource devtools overlay (dipanggil per request). */
     devtools?: () => DevtoolsData;
   },
@@ -118,13 +120,19 @@ async function handleRequest(
   getApp: () => Promise<DevApp>,
   req: IncomingMessage,
   res: ServerResponse,
-  options: { trustProxy?: boolean; bodyLimitBytes?: number; requestTimeoutMs?: number },
+  options: {
+    trustProxy?: boolean;
+    bodyLimitBytes?: number;
+    requestTimeoutMs?: number;
+    clientIpHeader?: string;
+  },
 ): Promise<void> {
   const app = await getApp();
   const url = resolveRequestUrl(req, { trustProxy: options.trustProxy === true });
   const isRpc = url.pathname.startsWith("/_moons/fn/");
   const request = await toWebRequest(req, {
     trustProxy: options.trustProxy === true,
+    ...(options.clientIpHeader === undefined ? {} : { clientIpHeader: options.clientIpHeader }),
     ...(isRpc ? { maxBodyBytes: options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES } : {}),
   });
   // Addendum R: paritas dev — batas waktu eksplisit yang sama dengan produksi.

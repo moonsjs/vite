@@ -61,6 +61,7 @@ export default function moons(options: MoonsVitePluginOptions = {}): Plugin {
   let trustProxy = false;
   let bodyLimitBytes: number | undefined;
   let requestTimeoutMs: number | undefined;
+  let clientIpHeader: string | undefined;
   let apiDir = "";
   let apiRoutes: ApiRouteDefinition[] = [];
   let apiMiddlewares: ApiMiddlewareDefinition[] = [];
@@ -253,6 +254,7 @@ export default function moons(options: MoonsVitePluginOptions = {}): Plugin {
       trustProxy = config.security?.trustProxy === true;
       bodyLimitBytes = config.security?.bodyLimitBytes;
       requestTimeoutMs = config.requestTimeoutMs;
+      clientIpHeader = config.security?.clientIpHeader;
 
       // Addendum D.1: scan + validasi statis modul `src/api`.
       apiDir = resolvePath(root, config.apiDir ?? "src/api");
@@ -469,6 +471,7 @@ export default function moons(options: MoonsVitePluginOptions = {}): Plugin {
         trustProxy,
         ...(bodyLimitBytes === undefined ? {} : { bodyLimitBytes }),
         ...(requestTimeoutMs === undefined ? {} : { requestTimeoutMs }),
+        ...(clientIpHeader === undefined ? {} : { clientIpHeader }),
       });
       server.config.logger.info("[moons] devtools: /__moons/devtools");
     },
@@ -582,7 +585,7 @@ function renderServerEntryBuild(
     "  onContext: (ctx) => plugins.applyExtensions(ctx),",
     "});",
     "",
-    `startServer(handler, { plugins, headers: config.headers, storage: config.isr?.storage, trustProxy: config.security?.trustProxy, bodyLimitBytes: config.security?.bodyLimitBytes, requestTimeoutMs: config.requestTimeoutMs, logging: config.logging, trailingSlash: config.trailingSlash${canary === undefined ? "" : `, canary: ${JSON.stringify(canary)}`} });`,
+    `startServer(handler, { plugins, headers: config.headers, storage: config.isr?.storage, trustProxy: config.security?.trustProxy, bodyLimitBytes: config.security?.bodyLimitBytes, requestTimeoutMs: config.requestTimeoutMs, clientIpHeader: config.security?.clientIpHeader, logging: config.logging, trailingSlash: config.trailingSlash${canary === undefined ? "" : `, canary: ${JSON.stringify(canary)}`} });`,
     "",
   ].join("\n");
 }

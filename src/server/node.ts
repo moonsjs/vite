@@ -43,10 +43,18 @@ export function resolveRequestUrl(
   }
 }
 
-/** IP klien tepercaya (Addendum J.1): XFF (hanya bila trustProxy) → socket. */
-export function resolveClientIp(req: IncomingMessage, trustProxy: boolean): string | null {
+/**
+ * IP klien tepercaya (Addendum J.1/S): header tepercaya (hanya bila trustProxy)
+ * → socket. Default `x-forwarded-for`; di belakang Cloudflare pakai
+ * `cf-connecting-ip` (XFF di-append CF → entri pertama bisa dipalsukan).
+ */
+export function resolveClientIp(
+  req: IncomingMessage,
+  trustProxy: boolean,
+  headerName = "x-forwarded-for",
+): string | null {
   return resolveClientIpValues(
-    req.headers["x-forwarded-for"],
+    req.headers[headerName],
     req.socket?.remoteAddress ?? null,
     trustProxy,
   );
@@ -76,7 +84,11 @@ export async function toWebRequest(
     }
   }
 
-  const clientIp = resolveClientIp(req, options.trustProxy === true);
+  const clientIp = resolveClientIp(
+    req,
+    options.trustProxy === true,
+    options.clientIpHeader ?? "x-forwarded-for",
+  );
   if (clientIp !== null) {
     headers.set(CLIENT_IP_HEADER, clientIp);
   }

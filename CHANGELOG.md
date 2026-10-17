@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.6.0 — 2026-10-17
+- feat: `security.clientIpHeader` plumbing on all transports (trusted client IP behind proxies)
+
 ## v0.5.0 — 2026-10-17
 - feat: explicit handler timeout on all transports (504 `E_REQUEST_TIMEOUT`; Bun `idleTimeout` aligned)
 - fix: `isr.storage.read` errors fall back to `dist/client` instead of 500 (review G2)
