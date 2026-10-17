@@ -1,6 +1,40 @@
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { MoonsConfig, RouteDefinition, RouteModule } from "@moonsjs/core";
+import type { renderToMarkup as RenderToMarkupFn } from "@moonsjs/react/ssr";
 import { createRequestHandler, type RequestHandlerOptions } from "./handler";
 import { DEFAULT_TEMPLATE, injectShell, type Shell } from "./shell";
+
+type RenderMarkup = typeof RenderToMarkupFn;
+
+/**
+ * Addendum O: resolve the SSR renderer from the app's own `node_modules` first.
+ * Bun resolves registry packages through its install cache; peer imports
+ * (`react-dom/server`) are not reachable from there, but they are from the app.
+ */
+async function loadRenderer(candidates: ReadonlyArray<string>): Promise<RenderMarkup> {
+  for (const root of candidates) {
+    for (const relative of [
+      "node_modules/@moonsjs/react/dist/ssr.js",
+      "node_modules/@moonsjs/react/dist/ssr.mjs",
+      "node_modules/@moonsjs/react/src/ssr.ts",
+    ]) {
+      const file = join(root, relative);
+      if (!existsSync(file)) {
+        continue;
+      }
+      const mod = (await import(pathToFileURL(file).href)) as {
+        renderToMarkup?: RenderMarkup;
+      };
+      if (typeof mod.renderToMarkup === "function") {
+        return mod.renderToMarkup;
+      }
+    }
+  }
+  const fallback = (await import("@moonsjs/react/ssr")) as { renderToMarkup: RenderMarkup };
+  return fallback.renderToMarkup;
+}
 
 export interface TestServerOptions {
   routes: RouteDefinition[];
@@ -45,6 +79,8 @@ export function createTestServer(
     ...(options.loadApiMiddleware === undefined
       ? {}
       : { loadApiMiddleware: options.loadApiMiddleware }),
+    renderer: () =>
+      loadRenderer([process.cwd(), resolve(options.routesDir, "..", "..")]),
     shell,
   });
 

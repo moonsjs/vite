@@ -21,7 +21,15 @@ import {
 } from "@moonsjs/core";
 import { encodeSsrPayload, reviveError, serializeError } from "@moonsjs/core/serialize";
 import { API_METHODS, resolveApiRoute } from "@moonsjs/core";
-import { renderToMarkup } from "@moonsjs/react/ssr";
+import type { renderToMarkup as RenderToMarkupFn } from "@moonsjs/react/ssr";
+
+type RenderMarkup = typeof RenderToMarkupFn;
+
+/** Default: bare dynamic import (bundlers keep this resolvable). */
+async function defaultRenderer(): Promise<RenderMarkup> {
+  const mod = (await import("@moonsjs/react/ssr")) as { renderToMarkup: RenderMarkup };
+  return mod.renderToMarkup;
+}
 import type { ClientRouteEntry, RouteModuleShape } from "@moonsjs/react/internal";
 import { createRpcHandler, runWithContext, runWithRequestCache, runWithResponseCollector, takeResponseMutations } from "@moonsjs/server";
 import { NOT_FOUND_ROUTE_KEY } from "../manifest";
@@ -59,6 +67,12 @@ export interface RequestHandlerOptions {
   apiMiddlewares?: ApiMiddlewareDefinition[];
   /** Peta import() `_middleware.ts` pohon api, key = file path. */
   loadApiMiddleware?: Record<string, () => Promise<unknown>>;
+  /**
+   * Addendum O: sumber `renderToMarkup`. Test server memakai loader ini untuk
+   * memuat renderer dari `node_modules` app (Bun meresolusi paket registry dari
+   * cache; peer `react-dom` tidak ditemukan dari sana).
+   */
+  renderer?: () => Promise<RenderMarkup>;
 }
 
 /**
@@ -67,7 +81,15 @@ export interface RequestHandlerOptions {
  */
 export function createRequestHandler(
   options: RequestHandlerOptions,
-): (request: Request) => Promise<Response> {  const { routes, config, routesDir, loadRoute, shell } = options;
+): (request: Request) => Promise<Response> {
+  let renderMarkup: RenderMarkup | null = null;
+  const getRenderMarkup = async (): Promise<RenderMarkup> => {
+    if (renderMarkup === null) {
+      renderMarkup = await (options.renderer ?? defaultRenderer)();
+    }
+    return renderMarkup;
+  };
+  const { routes, config, routesDir, loadRoute, shell } = options;
   const rpc = createRpcHandler(
     config.security === undefined ? {} : { security: config.security },
   );
@@ -98,7 +120,8 @@ export function createRequestHandler(
     // Addendum B.1: eksekusi `meta()` page (data = hasil loader page itu sendiri).
     const meta = await runRouteMeta(pageModule, data[pageKey], resolved.route.file);
 
-    const markup = renderToMarkup(
+    const render = await getRenderMarkup();
+    const markup = render(
       entry,
       { page: pageModule as RouteModuleShape, layouts: modules.slice(0, -1) as RouteModuleShape[] },
       resolved.params,
@@ -222,7 +245,8 @@ export function createRequestHandler(
         const key = routeKeyFromFile(routesDir, notFoundRoute.file);
         const [module] = await loadModules([key], loadRoute);
         const payload = encodeSsrPayload({ key: NOT_FOUND_ROUTE_KEY, params: {}, data: {} });
-        const markup = renderToMarkup(
+        const render = await getRenderMarkup();
+        const markup = render(
           { page: key, layouts: [] },
           { page: module as RouteModuleShape, layouts: [] },
           {},
@@ -272,7 +296,8 @@ export function createRequestHandler(
           data: {},
           ...(serialized === undefined ? {} : { error: serialized }),
         });
-        const markup = renderToMarkup(
+        const render = await getRenderMarkup();
+        const markup = render(
           { page: key, layouts: [] },
           { page: module as RouteModuleShape, layouts: [] },
           {},
