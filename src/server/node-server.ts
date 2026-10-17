@@ -18,6 +18,7 @@ import {
   applyStaticHeaders,
   gzipCached,
   isAbortLike,
+  parseRangeHeader,
   requestTimeoutText,
   resolveStaticFile,
   rpcBodyTooLargeText,
@@ -215,6 +216,27 @@ export function startNodeServer(
               ) {
                 res.statusCode = 304;
                 res.end();
+                return;
+              }
+
+              // Addendum T (G4): Range single-range untuk file statik (media).
+              res.setHeader("accept-ranges", "bytes");
+              const rawRange = req.headers["range"];
+              const range = parseRangeHeader(
+                Array.isArray(rawRange) ? (rawRange[0] ?? null) : (rawRange ?? null),
+                stat.size,
+              );
+              if (req.method === "GET" && range !== null) {
+                if (range.kind === "unsatisfiable") {
+                  res.statusCode = 416;
+                  res.setHeader("content-range", `bytes */${stat.size}`);
+                  res.end();
+                  return;
+                }
+                const slice = body.subarray(range.start, range.end + 1);
+                res.statusCode = 206;
+                res.setHeader("content-range", `bytes ${range.start}-${range.end}/${stat.size}`);
+                res.end(slice);
                 return;
               }
 

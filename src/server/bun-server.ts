@@ -17,6 +17,7 @@ import {
   forwardedProtocol,
   gzipCached,
   isAbortLike,
+  parseRangeHeader,
   readBodyWithLimit,
   requestTimeoutText,
   resolveClientIpValues,
@@ -276,6 +277,21 @@ export function startBunServer(
     const ifNoneMatch = request.headers.get("if-none-match");
     if (ifNoneMatch !== null && ifNoneMatch.split(",").some((value) => value.trim() === etag)) {
       return new Response(null, { status: 304, headers });
+    }
+
+    // Addendum T (G4): Range single-range untuk file statik (media).
+    headers.set("accept-ranges", "bytes");
+    const range =
+      request.method === "GET" ? parseRangeHeader(request.headers.get("range"), stat.size) : null;
+    if (range !== null) {
+      if (range.kind === "unsatisfiable") {
+        headers.set("content-range", `bytes */${stat.size}`);
+        return new Response(null, { status: 416, headers });
+      }
+      const full = readFileSync(staticFile);
+      const slice = full.subarray(range.start, range.end + 1);
+      headers.set("content-range", `bytes ${range.start}-${range.end}/${stat.size}`);
+      return new Response(slice as unknown as BodyInit, { status: 206, headers });
     }
 
     // K.5: gzip untuk aset teks (cache per mtime).

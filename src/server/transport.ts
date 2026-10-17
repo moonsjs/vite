@@ -279,6 +279,57 @@ export function textResponseWithHeaders(
   return new Response(text, { status, headers });
 }
 
+/**
+ * Addendum T (G4): `Range` single-range untuk file statik.
+ * `null` = tidak ada/format tidak didukung (sajikan penuh 200);
+ * `"unsatisfiable"` = 416; `partial` = 206 dengan `content-range`.
+ */
+export type RangeResult =
+  | { kind: "partial"; start: number; end: number }
+  | { kind: "unsatisfiable" }
+  | null;
+
+export function parseRangeHeader(value: string | null, size: number): RangeResult {
+  if (value === null) {
+    return null;
+  }
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
+  if (match === null) {
+    // Multi-range atau unit lain → abaikan (sajikan penuh).
+    return null;
+  }
+  const rawStart = match[1] ?? "";
+  const rawEnd = match[2] ?? "";
+  if (rawStart === "" && rawEnd === "") {
+    return null;
+  }
+  if (rawStart === "") {
+    // Suffix: `bytes=-N` → N byte terakhir.
+    const suffix = Number(rawEnd);
+    if (!Number.isFinite(suffix) || suffix <= 0) {
+      return null;
+    }
+    if (size === 0) {
+      return { kind: "unsatisfiable" };
+    }
+    return { kind: "partial", start: Math.max(0, size - suffix), end: size - 1 };
+  }
+  const start = Number(rawStart);
+  const end = rawEnd === "" ? size - 1 : Number(rawEnd);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    return null;
+  }
+  // Cek "tak terpuaskan" SEBELUM validasi start>end: `bytes=99-` dengan
+  // size kecil menghasilkan start>end karena end default size-1.
+  if (start >= size) {
+    return { kind: "unsatisfiable" };
+  }
+  if (start > end) {
+    return null;
+  }
+  return { kind: "partial", start, end: Math.min(end, size - 1) };
+}
+
 /** Target header minimal yang dipenuhi `ServerResponse` dan `Headers`. */
 export interface HeaderTarget {
   has(name: string): boolean;

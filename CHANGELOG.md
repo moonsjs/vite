@@ -1,5 +1,8 @@
 # Changelog
 
+## v0.7.0 — 2026-10-17
+- feat: single-range support for static files (`206`/`Content-Range`, `416` unsatisfiable, identity partials)
+
 ## v0.6.0 — 2026-10-17
 - feat: `security.clientIpHeader` plumbing on all transports (trusted client IP behind proxies)
 
