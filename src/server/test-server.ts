@@ -15,10 +15,13 @@ type RenderMarkup = typeof RenderToMarkupFn;
  */
 async function loadRenderer(candidates: ReadonlyArray<string>): Promise<RenderMarkup> {
   for (const root of candidates) {
+    // Prefer `src/ssr.ts`: under Bun the app's own modules resolve
+    // `@moonsjs/react` through the "bun" condition (source), so the renderer
+    // must come from the same module instance.
     for (const relative of [
+      "node_modules/@moonsjs/react/src/ssr.ts",
       "node_modules/@moonsjs/react/dist/ssr.js",
       "node_modules/@moonsjs/react/dist/ssr.mjs",
-      "node_modules/@moonsjs/react/src/ssr.ts",
     ]) {
       const file = join(root, relative);
       if (!existsSync(file)) {
