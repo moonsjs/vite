@@ -1,5 +1,5 @@
 import type { MoonsConfig, RouteDefinition, RouteModule } from "@moonsjs/core";
-import { createRequestHandler } from "./handler";
+import { createRequestHandler, type RequestHandlerOptions } from "./handler";
 import { DEFAULT_TEMPLATE, injectShell, type Shell } from "./shell";
 
 export interface TestServerOptions {
@@ -7,6 +7,11 @@ export interface TestServerOptions {
   config: MoonsConfig;
   routesDir: string;
   loadRoute: Record<string, () => Promise<RouteModule>>;
+  /** Endpoint `src/api` (Addendum O) — hasil scan app. */
+  apiRoutes?: RequestHandlerOptions["apiRoutes"];
+  loadApi?: RequestHandlerOptions["loadApi"];
+  apiMiddlewares?: RequestHandlerOptions["apiMiddlewares"];
+  loadApiMiddleware?: RequestHandlerOptions["loadApiMiddleware"];
   /** Default: shell in-memory dari `DEFAULT_TEMPLATE` (tanpa file). */
   shell?: Shell;
 }
@@ -34,6 +39,12 @@ export function createTestServer(
     config: options.config,
     routesDir: options.routesDir,
     loadRoute: options.loadRoute,
+    ...(options.apiRoutes === undefined ? {} : { apiRoutes: options.apiRoutes }),
+    ...(options.loadApi === undefined ? {} : { loadApi: options.loadApi }),
+    ...(options.apiMiddlewares === undefined ? {} : { apiMiddlewares: options.apiMiddlewares }),
+    ...(options.loadApiMiddleware === undefined
+      ? {}
+      : { loadApiMiddleware: options.loadApiMiddleware }),
     shell,
   });
 

@@ -104,6 +104,8 @@ export function createRequestHandler(
       resolved.params,
       data,
       searchParams,
+      undefined,
+      config.trailingSlash,
     );
     const payload = encodeSsrPayload({
       key: pageKey,
@@ -116,7 +118,10 @@ export function createRequestHandler(
     // A1: pindai payload SSR (dev saja — `payloadScan` tidak diisi production).
     warnPayloadFindings(payload, options.payloadScan, warnedPayloadLabels);
 
-    return htmlResponse(await shell(markup, payload, request.url, meta), 200);
+    return htmlResponse(
+      withTrailingSlashMeta(await shell(markup, payload, request.url, meta), config.trailingSlash),
+      200,
+    );
   }
 
   /** Addendum D.1: dispatch endpoint `src/api` (405/HEAD/OPTIONS + error). */
@@ -222,20 +227,22 @@ export function createRequestHandler(
           { page: module as RouteModuleShape, layouts: [] },
           {},
           {},
+          {},
+          undefined,
+          config.trailingSlash,
         );
-        return htmlResponse(await shell(markup, payload, request.url), 404);
+        return htmlResponse(
+          withTrailingSlashMeta(await shell(markup, payload, request.url), config.trailingSlash),
+          404,
+        );
       } catch (error) {
         console.error("[moons] failed to render custom _404:", error);
       }
     }
 
     const payload = encodeSsrPayload({ key: "", params: {}, data: {} });
-    const html = await shell(
-      "<h1>404</h1><p>Page not found.</p>",
-      payload,
-      request.url,
-    );
-    return htmlResponse(html, 404);
+    const html = await shell("<h1>404</h1><p>Page not found.</p>", payload, request.url);
+    return htmlResponse(withTrailingSlashMeta(html, config.trailingSlash), 404);
   }
 
   /**
@@ -272,8 +279,12 @@ export function createRequestHandler(
           {},
           {},
           serialized === undefined ? undefined : reviveError(serialized),
+          config.trailingSlash,
         );
-        return htmlResponse(await shell(markup, payload, request.url), 500);
+        return htmlResponse(
+          withTrailingSlashMeta(await shell(markup, payload, request.url), config.trailingSlash),
+          500,
+        );
       } catch (renderError) {
         console.error("[moons] failed to render custom _error:", renderError);
       }
@@ -614,6 +625,17 @@ function internalErrorResponse(error: unknown, options: { log?: boolean } = {}):
   return htmlResponse(
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>500</title></head><body><h1>500</h1>${detail}</body></html>`,
     500,
+  );
+}
+
+/** Addendum O: expose the trailing-slash policy to the client runtime. */
+function withTrailingSlashMeta(html: string, policy?: "never" | "always"): string {
+  if (policy === undefined) {
+    return html;
+  }
+  return html.replace(
+    "</head>",
+    `  <meta name="moons:trailing-slash" content="${policy}" />\n</head>`,
   );
 }
 

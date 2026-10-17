@@ -133,6 +133,11 @@ function shouldHandle(req: IncomingMessage, apiPrefix: string | undefined): bool
     return true;
   }
 
+  // Addendum O: health check (semua method) — paritas 405 dengan produksi.
+  if (path === "/_moons/health") {
+    return true;
+  }
+
   // Addendum D.1: endpoint `src/api` (semua method) dirutekan ke runtime.
   if (apiPrefix !== undefined && (path === apiPrefix || path.startsWith(`${apiPrefix}/`))) {
     return true;

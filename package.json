@@ -1,6 +1,6 @@
 {
   "name": "@moonsjs/vite",
-  "version": "0.1.18",
+  "version": "0.2.0",
   "type": "module",
   "license": "MIT",
   "sideEffects": false,
@@ -31,18 +31,28 @@
       "types": "./src/transform.ts",
       "bun": "./src/transform.ts",
       "default": "./dist/transform.js"
+    },
+    "./testing": {
+      "types": "./src/testing.ts",
+      "bun": "./src/testing.ts",
+      "default": "./dist/testing.js"
+    },
+    "./testing/preload": {
+      "types": "./src/testing-preload.ts",
+      "bun": "./src/testing-preload.ts",
+      "default": "./dist/testing-preload.js"
     }
   },
   "scripts": {
     "prepack": "bun run build",
-    "build": "rm -rf dist && tsc -p tsconfig.json --emitDeclarationOnly && bun build src/index.ts src/server/index.ts src/transform.ts --outdir dist --target node --format esm --splitting --sourcemap=external --external @moonsjs/core --external '@moonsjs/core/*' --external @moonsjs/react --external '@moonsjs/react/*' --external @moonsjs/server --external '@moonsjs/server/*' --external @babel/parser --external vite",
+    "build": "rm -rf dist && tsc -p tsconfig.json --emitDeclarationOnly && bun build src/index.ts src/server/index.ts src/transform.ts src/testing.ts src/testing-preload.ts --outdir dist --target node --format esm --splitting --sourcemap=external --external @moonsjs/core --external '@moonsjs/core/*' --external @moonsjs/react --external '@moonsjs/react/*' --external @moonsjs/server --external '@moonsjs/server/*' --external @babel/parser --external vite",
     "test": "bun test"
   },
   "dependencies": {
     "@babel/parser": "^8.0.7",
-    "@moonsjs/core": "^0.1.0",
-    "@moonsjs/react": "^0.1.0",
-    "@moonsjs/server": "^0.1.0"
+    "@moonsjs/core": "^0.2.0",
+    "@moonsjs/react": "^0.2.0",
+    "@moonsjs/server": "^0.2.0"
   },
   "peerDependencies": {
     "vite": "^8.3.4"
