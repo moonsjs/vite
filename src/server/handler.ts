@@ -91,6 +91,13 @@ export function createRequestHandler(
     if (renderMarkup !== null) {
       return renderMarkup;
     }
+    // A preloaded renderer (test preloads) avoids awaiting a pending import
+    // inside a request — Bun drops AsyncLocalStorage contexts in that case.
+    const injected = (globalThis as { __moons_renderToMarkup?: unknown }).__moons_renderToMarkup;
+    if (typeof injected === "function") {
+      renderMarkup = injected as RenderMarkup;
+      return renderMarkup;
+    }
     const resolved = options.renderer === undefined ? await defaultRenderer : await options.renderer();
     if (resolved === null) {
       throw new MoonsError({
